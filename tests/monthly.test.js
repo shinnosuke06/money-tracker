@@ -16,6 +16,7 @@ require('../js/core/util.js');
 require('../js/core/store.js');
 require('../js/features/monthly/model.js');
 require('../js/features/payments/model.js'); // v1 → v2 の移行が入っている
+require('../js/features/assets/model.js'); // v2 → v3 の移行が入っている
 require('../js/data/sample.js');
 
 const { util: U, store, monthlyModel: M, sample } = globalThis.MT;

@@ -228,6 +228,38 @@
     return { ok: true, value: v === 0 ? 0 : v, isExpression }; // -0 を 0 にそろえる
   }
 
+  /**
+   * 小数を含む数(数量・単価など)を解釈する。式も可。maxDecimals 桁で四捨五入。
+   * @returns {{ok: true, value: number|null, isExpression: boolean} | {ok: false, error: string}}
+   */
+  function parseDecimal(raw, maxDecimals = 4) {
+    const s = normalizeAmountText(raw);
+    if (s === '') return { ok: true, value: null, isExpression: false };
+    if (s.length > 200) return { ok: false, error: '式が長すぎます' };
+    let v;
+    let isExpression = false;
+    if (/^-?\d+(\.\d+)?$/.test(s)) v = Number(s);
+    else if (/^[\d+\-*/().]+$/.test(s)) {
+      isExpression = true;
+      try {
+        v = evalExpression(s);
+      } catch (e) {
+        return { ok: false, error: e.message || '式を計算できません' };
+      }
+    } else return { ok: false, error: '数字か式で入力してください' };
+    if (!Number.isFinite(v) || Math.abs(v) > 1e12) return { ok: false, error: '数が大きすぎます' };
+    const f = 10 ** maxDecimals;
+    v = (v < 0 ? -Math.round(-v * f) : Math.round(v * f)) / f;
+    return { ok: true, value: v === 0 ? 0 : v, isExpression };
+  }
+
+  const numberFormats = {};
+  /** 小数つきの数を 3 桁区切りで(maxDecimals 桁まで) */
+  function formatNumber(n, maxDecimals = 4) {
+    if (!numberFormats[maxDecimals]) numberFormats[maxDecimals] = new Intl.NumberFormat('ja-JP', { maximumFractionDigits: maxDecimals });
+    return numberFormats[maxDecimals].format(n);
+  }
+
   /** 金額を 1,000 円などの単位で切り上げる */
   function roundUp(n, unit) {
     return n <= 0 ? 0 : Math.ceil(n / unit) * unit;
@@ -290,6 +322,8 @@
     yenInput,
     percentSigned,
     parseYen,
+    parseDecimal,
+    formatNumber,
     evalExpression,
     roundUp,
     isYenValue,

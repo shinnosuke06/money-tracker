@@ -3,6 +3,8 @@
  * 月末記録:今日から見て「2か月前まで」の 6 か月分。先月の記録はわざと入れていない(上部の案内を試せる)。
  * 支払い管理:管理中の月をわざと「先月」にしてある。開くとすぐ月替わり(締め)が動き、
  *             先月分が履歴に入り、「済」が外れ、変動費が空欄になる。
+ * 資産管理:証券A・証券B の架空の銘柄(コードも実在しない形)と手入力の資産、推移の履歴。
+ *           米国銘柄Q はわざと価格なし(「価格未取得」の表示を試せる)。
  */
 (function (root) {
   'use strict';
@@ -132,6 +134,74 @@
     return p;
   }
 
+  // ---- 資産管理(すべて架空。コードは実在しない形にしてある) ----
+
+  const HOLDINGS = [
+    { id: 'smp_h_x', broker: '証券A', account: 'tokutei', type: 'jp', code: 'X101', name: '銘柄X', quantity: 100, avgPrice: 1520, price: 1784,
+      dividend: { perShare: 30, months: [6, 12] }, benefit: { content: 'カタログギフト(サンプル)', minShares: 100, recordMonths: [3], arriveMonths: [6] } },
+    { id: 'smp_h_y', broker: '証券A', account: 'nisa_new', type: 'jp', code: 'X102', name: '銘柄Y', quantity: 100, avgPrice: 2310, price: 2195,
+      dividend: { perShare: 45, months: [3, 9] }, benefit: { content: 'お米の引換券(サンプル)', minShares: 200, recordMonths: [9], arriveMonths: [12] } },
+    { id: 'smp_h_m', broker: '証券A', account: 'nisa_new', type: 'fund', code: 'XFUND001', name: 'ファンドM', quantity: 42.1875, avgPrice: 18420, price: 21366 },
+    { id: 'smp_h_n', broker: '証券A', account: 'nisa_old', type: 'fund', code: 'XFUND002', name: 'ファンドN', quantity: 18.5, avgPrice: 13050, price: 17872 },
+    { id: 'smp_h_z', broker: '証券B', account: 'tokutei', type: 'jp', code: 'X103', name: '銘柄Z', quantity: 300, avgPrice: 812, price: 768,
+      dividend: { perShare: 12, months: [6, 12] } },
+    { id: 'smp_h_p', broker: '証券B', account: 'tokutei', type: 'us', code: 'XUS', name: '米国銘柄P', quantity: 15, avgPrice: 21800, priceUsd: 168.4,
+      dividend: { perShare: 0.62, months: [3, 6, 9, 12] } },
+    { id: 'smp_h_q', broker: '証券B', account: 'nisa_new', type: 'us', code: 'XUSQ', name: '米国銘柄Q', quantity: 8, avgPrice: 15600 },
+  ];
+
+  const MANUAL = [
+    { id: 'smp_m_point', name: 'ポイント運用A', category: 'invest', value: 52300, cost: 48000 },
+    { id: 'smp_m_wallet', name: 'ウォレットB', category: 'cash', value: 18000, cost: 18000 },
+    { id: 'smp_m_gold', name: '金(現物)', category: 'other', value: 132000, cost: 110000 },
+    { id: 'smp_m_collect', name: 'コレクション', category: 'other', value: 85000, cost: 60000, sellPriority: 'first' },
+  ];
+
+  function buildAssets(now) {
+    const a = MT.assetsModel.create();
+    const day = (n) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - n);
+      return U.todayStr(d);
+    };
+    const priceAt = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 18, 0).toISOString();
+    a.holdings = HOLDINGS.map((x) =>
+      MT.assetsModel.cleanHolding({ ...x, priceAt: x.price || x.priceUsd ? priceAt : null, priceSource: x.price || x.priceUsd ? 'sample' : null })
+    );
+    a.manual = MANUAL.map((m) => MT.assetsModel.cleanManual({ ...m, updatedAt: day(12) }));
+    a.fx = { rate: 150, source: 'manual', at: priceAt };
+    a.lastUpdateAt = priceAt;
+    a.settings.fxManual = 150;
+    a.settings.reflect = {
+      groupBy: 'account',
+      map: { tokutei: 'smp_sec_main', ippan: 'smp_sec_main', nisa_old: 'smp_sec_nisa', nisa_new: 'smp_sec_nisa' },
+      manualMap: {},
+    };
+    a.recent = { broker: '証券A', account: 'nisa_new', type: 'jp' };
+    // 推移(古い順):いまの評価額を基準に、少しずつ増えてきた形にする
+    const now0 = MT.assetsModel.summary(a);
+    const factors = [
+      [56, 0.931],
+      [49, 0.946],
+      [42, 0.958],
+      [35, 0.951],
+      [28, 0.972],
+      [21, 0.984],
+      [14, 0.978],
+      [7, 0.991],
+    ];
+    a.history = factors.map(([n, f]) => {
+      const byBroker = {};
+      let total = 0;
+      for (const [k, g] of now0.byBroker) {
+        const v = k === MT.assetsModel.MANUAL_BROKER ? g.value : Math.round((g.value * f) / 100) * 100;
+        byBroker[k] = v;
+        total += v;
+      }
+      return { date: day(n), total, gain: null, byBroker, missing: 1 };
+    });
+    return a;
+  }
+
   function build(now = new Date()) {
     const data = MT.store.createEmpty(now);
     const last = U.ymAdd(U.currentYM(now), -2);
@@ -156,6 +226,7 @@
       monthly.records[ym] = rec;
     });
     data.payments = buildPayments(now);
+    data.assets = buildAssets(now);
     return data;
   }
 

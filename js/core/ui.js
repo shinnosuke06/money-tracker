@@ -108,15 +108,23 @@
   /**
    * 金額の入力欄(式も可)。数字キーボードのまま「+ − ×」を入れられるボタン付き。
    * 式のときは下に計算結果を出す。保存時に result() で整数にする。
-   * @param {{value?: number|null, size?: 'normal'|'large', label?: string, placeholder?: string, onChange?: Function}} opts
+   * @param {{value?: number|null, size?: 'normal'|'large', label?: string, placeholder?: string, onChange?: Function,
+   *          compact?: boolean, decimals?: number, unit?: string}} opts
+   *   compact: 計算ボタンは入力中だけ出す(内訳など、欄が多いところ用)
+   *   decimals: 小数を許す桁数(数量・単価など)。0 なら円の整数
+   *   unit: 単位の表示(既定は「円」)
    */
   function amountField(opts = {}) {
     const U = MT.util;
-    // compact: 計算ボタンは入力中だけ出す(内訳など、欄が多いところ用)
+    const decimals = opts.decimals || 0;
+    const unit = opts.unit == null ? '円' : opts.unit;
+    const parse = (v) => (decimals ? U.parseDecimal(v, decimals) : U.parseYen(v));
+    const fmt = (v) => (decimals ? U.formatNumber(v, decimals) : U.yen(v));
+    const toInput = (v) => (decimals ? U.formatNumber(v, decimals) : U.yenInput(v));
     const input = h('input', {
       class: `amount-input${opts.size === 'large' ? ' is-large' : ''}`,
       type: 'text',
-      inputmode: 'numeric',
+      inputmode: decimals ? 'decimal' : 'numeric',
       autocomplete: 'off',
       enterkeyhint: 'done',
       placeholder: opts.placeholder || '0',
@@ -125,13 +133,14 @@
     const calc = h('span', { class: 'amount-calc', 'aria-live': 'polite' });
 
     function update() {
-      const r = U.parseYen(input.value);
-      calc.textContent = r.ok && r.isExpression && r.value !== null ? `= ${U.yen(r.value)}円` : '';
+      const r = parse(input.value);
+      calc.textContent = r.ok && r.isExpression && r.value !== null ? `= ${fmt(r.value)}${unit}` : '';
       if (opts.onChange) opts.onChange(r);
     }
 
-    /** 普通の数字を打っているときだけ 3 桁区切りにする(カーソルが末尾のとき) */
+    /** 普通の数字を打っているときだけ 3 桁区切りにする(カーソルが末尾のとき。小数の欄ではしない) */
     function reformat() {
+      if (decimals) return;
       const raw = input.value;
       if (input.selectionStart !== raw.length) return;
       if (!/^\s*[-−ー▲]?[\d０-９,，\s]+$/.test(raw)) return;
@@ -172,7 +181,7 @@
     const el = h(
       'div',
       { class: `amount-field${opts.compact ? ' is-compact' : ''}` },
-      h('div', { class: 'amount-row' }, input, h('span', { class: 'amount-unit', text: '円' })),
+      h('div', { class: 'amount-row' }, input, unit ? h('span', { class: 'amount-unit', text: unit }) : null),
       h(
         'div',
         { class: 'amount-tools' },
@@ -186,9 +195,9 @@
     const api = {
       el,
       input,
-      result: () => U.parseYen(input.value),
+      result: () => parse(input.value),
       setValue(v) {
-        input.value = v == null ? '' : U.yenInput(v);
+        input.value = v == null ? '' : toInput(v);
         update();
       },
       focus(select = true) {
@@ -202,7 +211,7 @@
         }
       },
     };
-    if (opts.value != null) input.value = U.yenInput(opts.value);
+    if (opts.value != null) input.value = toInput(opts.value);
     return api;
   }
 

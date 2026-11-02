@@ -18,12 +18,8 @@
   // 小さな部品
   // ---------------------------------------------------------------
 
-  function selectEl(options, value, attrs = {}) {
-    const sel = h('select', { class: 'field-select', ...attrs });
-    for (const o of options) sel.append(h('option', { value: o.value, disabled: o.disabled, text: o.label }));
-    sel.value = value == null ? '' : String(value);
-    return sel;
-  }
+  const { selectEl, segmented, ymPicker, checkbox, textInput, field, formFoot, errorLine, confirmDelete } = MT.forms;
+  const memoArea = (value) => MT.forms.memoArea(value, P.MEMO_MAX);
 
   /** 口座の選択(口座なし + 支払いで使う口座) */
   function accountSelect(d, value, { noneLabel = '口座なし', label = '口座' } = {}) {
@@ -31,75 +27,6 @@
       d.payments.accounts.map((a) => ({ value: a.itemId, label: `${P.accountName(d, a.itemId)}${a.kind === 'cash' ? '(手元現金)' : ''}` }))
     );
     return selectEl(options, value, { 'aria-label': label });
-  }
-
-  /** ボタンを並べた選択(どれか 1 つ) */
-  function segmented(options, value, { label, onChange } = {}) {
-    let current = value;
-    const buttons = options.map((o) =>
-      h('button', {
-        type: 'button',
-        role: 'radio',
-        'aria-checked': String(o.value === current),
-        text: o.label,
-        onClick: () => {
-          current = o.value;
-          for (const [i, b] of buttons.entries()) b.setAttribute('aria-checked', String(options[i].value === current));
-          if (onChange) onChange(current);
-        },
-      })
-    );
-    return { el: h('div', { class: 'seg seg-wide', role: 'radiogroup', 'aria-label': label }, buttons), value: () => current };
-  }
-
-  /** 年月の選択。allowNone なら「なし」を選べる */
-  function ymPicker(value, { allowNone = true, from = U.currentYM(), years = 30, label = '年月' } = {}) {
-    const fromY = U.splitYM(from).y;
-    const curY = value ? Math.min(U.splitYM(value).y, fromY) : fromY;
-    const yearOpts = [];
-    if (allowNone) yearOpts.push({ value: '', label: 'なし' });
-    for (let y = Math.min(curY, fromY - 1); y <= fromY + years; y++) yearOpts.push({ value: String(y), label: `${y}年` });
-    const yearSel = selectEl(yearOpts, value ? U.splitYM(value).y : allowNone ? '' : fromY, { 'aria-label': `${label}(年)` });
-    const monthSel = selectEl(
-      Array.from({ length: 12 }, (_, i) => ({ value: String(i + 1), label: `${i + 1}月` })),
-      value ? U.splitYM(value).m : U.splitYM(from).m,
-      { 'aria-label': `${label}(月)` }
-    );
-    const sync = () => {
-      monthSel.disabled = yearSel.value === '';
-    };
-    yearSel.addEventListener('change', sync);
-    sync();
-    return {
-      el: h('div', { class: 'ym-row' }, yearSel, monthSel),
-      value: () => (yearSel.value === '' ? null : U.makeYM(Number(yearSel.value), Number(monthSel.value))),
-    };
-  }
-
-  function checkbox(label, checked) {
-    const input = h('input', { type: 'checkbox', checked });
-    return { el: h('label', { class: 'check' }, input, h('span', { text: label })), input };
-  }
-
-  function textInput(value, attrs = {}) {
-    return h('input', { class: 'field-input', type: 'text', autocomplete: 'off', value: value || '', ...attrs });
-  }
-
-  function memoArea(value) {
-    const ta = h('textarea', { class: 'field-textarea field-textarea-sm', rows: 2, maxlength: P.MEMO_MAX, 'aria-label': 'メモ' });
-    ta.value = value || '';
-    return ta;
-  }
-
-  /** ラベルつきの入力行 */
-  function field(label, control, hint) {
-    return h(
-      'div',
-      { class: 'form-row' },
-      h('span', { class: 'form-label', text: label }),
-      control,
-      hint ? h('p', { class: 'form-hint', text: hint }) : null
-    );
   }
 
   function catDot(id) {
@@ -112,41 +39,6 @@
 
   function moneyText(v) {
     return v === null || v === undefined ? '未入力' : `${U.yen(v)}円`;
-  }
-
-  /** フォームの下部(削除・キャンセル・保存) */
-  function formFoot(s, { onSave, onDelete, saveLabel = '保存' }) {
-    add(
-      s.foot,
-      onDelete ? btn('削除', { variant: 'ghost', className: 'btn-ghost-danger', onClick: onDelete }) : null,
-      btn('キャンセル', { onClick: () => s.close() }),
-      btn(saveLabel, { variant: 'primary', onClick: onSave })
-    );
-  }
-
-  function errorLine() {
-    const el = h('p', { class: 'field-error', role: 'alert', hidden: true });
-    return {
-      el,
-      show(msg, focusEl) {
-        el.textContent = msg;
-        el.hidden = false;
-        if (focusEl) focusEl.focus();
-        el.scrollIntoView({ block: 'nearest' });
-      },
-      hide() {
-        el.hidden = true;
-      },
-    };
-  }
-
-  async function confirmDelete(name, kindLabel) {
-    return confirmDialog({
-      title: `「${name}」を削除しますか?`,
-      message: [`この${kindLabel}を削除します。`, '間違えた場合は、設定の「直前のデータに戻す」で元に戻せます。'],
-      okLabel: '削除する',
-      danger: true,
-    });
   }
 
   // ---------------------------------------------------------------

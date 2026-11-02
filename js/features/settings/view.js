@@ -1,5 +1,5 @@
 /*
- * 設定:データの書き出し・読み込み、サンプル、元に戻す、全削除
+ * 設定:データの書き出し・読み込み、価格の自動取得、旧アプリの取り込み、サンプル、元に戻す、全削除
  */
 (function (root) {
   'use strict';
@@ -49,11 +49,13 @@
         h('p', { class: 'hint', text: lastExport ? `この端末で最後に書き出した日時:${formatDateTime(lastExport)}` : 'この端末ではまだ書き出していません。' })
       ),
 
+      priceSettingsCard(d),
+
       h(
         'section',
         { class: 'card' },
         h('h2', { class: 'card-title', text: 'サンプルデータ' }),
-        h('p', { text: '架空の項目と 6 か月分の金額、支払い管理の例を読み込んで、動きを試せます。今のデータは上書きされます。' }),
+        h('p', { text: '架空の項目と 6 か月分の金額、支払い管理・資産管理の例を読み込んで、動きを試せます。今のデータは上書きされます。' }),
         h('div', { class: 'button-col' }, btn('サンプルを読み込む', { onClick: loadSampleFlow }))
       ),
 
@@ -63,6 +65,14 @@
         h('h2', { class: 'card-title', text: '旧・支払い管理アプリから移行' }),
         h('p', { text: '旧アプリのバックアップ(JSON テキスト)を読み込み、支払い管理のデータに変換します。読み込む前に、変換結果と、変換できなかった項目の一覧を確認できます。' }),
         h('div', { class: 'button-col' }, btn('旧・支払い管理アプリのバックアップを読み込む', { icon: 'upload', onClick: legacyImportFlow }))
+      ),
+
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card-title', text: '旧・資産管理アプリから移行' }),
+        h('p', { text: '旧アプリのバックアップ(JSON)の保有銘柄・履歴・価格を、資産管理のデータに変換します。読み込む前に、変換結果と、変換できなかった項目の一覧を確認できます。' }),
+        h('div', { class: 'button-col' }, btn('旧・資産管理アプリのバックアップを読み込む', { icon: 'upload', onClick: assetsLegacyFlow }))
       ),
 
       h(
@@ -111,11 +121,11 @@
         'section',
         { class: 'card card-danger' },
         h('h2', { class: 'card-title', text: 'すべてのデータを削除' }),
-        h('p', { text: 'この端末に保存しているマネートラッカーのデータを消して、最初の状態に戻します。' }),
+        h('p', { text: 'この端末に保存しているマネートラッカーのデータを消して、最初の状態に戻します。価格取得の URL とキーは残ります(上の「URLとキーを消す」で消せます)。' }),
         h('div', { class: 'button-col' }, btn('すべて削除する', { variant: 'danger', onClick: clearFlow }))
       ),
 
-      h('p', { class: 'app-version', text: 'マネートラッカー 段階2(支払い管理)' })
+      h('p', { class: 'app-version', text: 'マネートラッカー 段階3(資産管理)' })
     );
   }
 
@@ -123,10 +133,115 @@
     return [h('dt', { text: label }), h('dd', { text: value })];
   }
 
+  // ---- 価格の自動取得(資産管理) ----
+
+  function priceSettingsCard(d) {
+    const A = MT.assetsModel;
+    const sec = MT.secrets.get();
+    const set = d.assets.settings;
+    const { field, textInput } = MT.forms;
+    const url = textInput(sec.priceUrl || '', { type: 'url', inputmode: 'url', autocapitalize: 'off', spellcheck: 'false', placeholder: 'https://…', 'aria-label': '価格取得のURL' });
+    const key = textInput(sec.finnhubKey || '', { type: 'password', autocapitalize: 'off', spellcheck: 'false', placeholder: '未設定', 'aria-label': 'Finnhub の APIキー' });
+    const showKey = btn('表示', {
+      size: 'small',
+      onClick: () => {
+        key.type = key.type === 'password' ? 'text' : 'password';
+        showKey.querySelector('span').textContent = key.type === 'password' ? '表示' : '隠す';
+      },
+    });
+    const fxCode = textInput(set.fxCode, { maxlength: 20, autocapitalize: 'characters', 'aria-label': '為替のコード' });
+    const fxManual = MT.ui.amountField({ value: set.fxManual, decimals: 4, unit: '円', label: 'USD/JPY(手入力)', compact: true });
+    const tax = MT.ui.amountField({ value: Math.round(set.taxRate * 100000) / 1000, decimals: 3, unit: '%', label: '税率', compact: true });
+    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+
+    function save() {
+      err.hidden = true;
+      const u = url.value.trim();
+      if (u && !/^https:\/\/[^\s]+$/.test(u)) {
+        err.textContent = 'URL は https:// で始まるものを入れてください';
+        err.hidden = false;
+        return;
+      }
+      const fx = fxManual.result();
+      const t = tax.result();
+      if (!fx.ok || (fx.value !== null && fx.value <= 0)) {
+        err.textContent = 'USD/JPY は 0 より大きい数で入れてください';
+        err.hidden = false;
+        return;
+      }
+      if (!t.ok || t.value === null || t.value < 0 || t.value >= 100) {
+        err.textContent = '税率は 0〜100 の % で入れてください';
+        err.hidden = false;
+        return;
+      }
+      MT.secrets.set({ priceUrl: u, finnhubKey: key.value.trim() });
+      if (
+        store.update((dd) => {
+          dd.assets.settings.fxManual = fx.value;
+          dd.assets.settings.fxCode = A.normCode(fxCode.value) || 'USDJPY';
+          dd.assets.settings.taxRate = t.value / 100;
+        })
+      )
+        toast('価格取得の設定を保存しました');
+    }
+
+    async function clearSecrets() {
+      const ok = await confirmDialog({ title: 'URLとキーを消しますか?', message: ['この端末に保存している価格取得の URL と Finnhub のキーを消します。'], okLabel: '消す', danger: true });
+      if (!ok) return;
+      MT.secrets.clear();
+      MT.app.rerender();
+      toast('URLとキーを消しました');
+    }
+
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: '価格の自動取得(資産)' }),
+      h('div', { class: 'form-stack' },
+        field('国内株・投資信託の価格取得URL', url, '「?codes=コード1,コード2」を付けて問い合わせます。返事の version が "v6" のものに対応しています。'),
+        field('Finnhub の APIキー(米国株)', h('div', { class: 'input-with-btn' }, key, showKey), 'キーが無いときは、米国株の株価をドルで手入力します。'),
+        h('div', { class: 'form-2col' }, field('為替のコード', fxCode), field('USD/JPY(手入力)', fxManual.el)),
+        h('p', { class: 'form-hint', text: 'USD/JPY は、上の URL に為替のコードも一緒に問い合わせて取得します。取れないときは手入力の値を使います。' }),
+        field('税率(課税口座の含み益・配当)', tax.el, '既定は 20.315%。NISA は 0% として計算します。'),
+        err
+      ),
+      h('p', { class: 'hint', text: 'URL とキーはこの端末の中だけに保存し、JSON の書き出しには含めません(書き出すときに含めることもできます)。送るのは銘柄コードだけで、数量や金額は送りません。' }),
+      h(
+        'div',
+        { class: 'button-row' },
+        btn('保存', { variant: 'primary', onClick: save }),
+        btn('月末記録への反映先', { onClick: () => MT.assetsUI.openReflectMappingSheet() }),
+        MT.secrets.has() ? btn('URLとキーを消す', { variant: 'ghost', className: 'btn-ghost-danger', onClick: clearSecrets }) : null
+      )
+    );
+  }
+
   // ---- 書き出し ----
 
+  /** 価格取得の URL とキーがあれば、含めるかどうかを聞いてから書き出す */
   function exportFlow() {
-    const json = store.exportJSON();
+    if (!MT.secrets.has()) return doExport(false);
+    const s = openSheet({ title: 'JSON ファイルに書き出す', className: 'sheet-form' });
+    const { checkbox } = MT.forms;
+    const box = checkbox('価格取得の URL と APIキーも含める', false);
+    s.body.append(
+      box.el,
+      h('p', { class: 'form-hint', text: '含めると、ファイルを見た人が URL やキーを使えてしまいます。人に渡すファイルや、公開する場所には含めないでください。' })
+    );
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('書き出す', {
+        variant: 'primary',
+        onClick: () => {
+          s.close();
+          doExport(box.input.checked);
+        },
+      })
+    );
+  }
+
+  function doExport(withSecrets) {
+    const json = store.exportJSON(withSecrets ? { secrets: MT.secrets.get() } : null);
     const name = `money-tracker-${U.todayStr()}.json`;
     const blob = new Blob([json], { type: 'application/json' });
     const done = () => {
@@ -186,19 +301,25 @@
       return;
     }
     const exportedAt = parsed.meta && parsed.meta.exportedAt;
+    const fileSecrets = MT.secrets.clean(parsed.secrets);
+    const hasSecrets = Object.keys(fileSecrets).length > 0;
     const ok = await confirmDialog({
       title: 'データを読み込みますか?',
       message: [
         `ファイル:${file.name}`,
         ...store.summarize(res.data),
         exportedAt ? `書き出した日時:${formatDateTime(exportedAt)}` : null,
+        hasSecrets ? 'このファイルには価格取得の URL・キーが入っているので、それも読み込みます。' : null,
         '今のデータはすべて上書きされます。(上書き前のデータは「直前のデータに戻す」で戻せます)',
       ].filter(Boolean),
       okLabel: '上書きして読み込む',
       danger: true,
     });
     if (!ok) return;
-    if (store.replaceAll(res.data, 'ファイルの読み込み')) toast('読み込みました');
+    if (store.replaceAll(res.data, 'ファイルの読み込み')) {
+      if (hasSecrets) MT.secrets.set(fileSecrets);
+      toast('読み込みました');
+    }
   }
 
   // ---- サンプル ----
@@ -312,6 +433,144 @@
             s.close();
             MT.app.navigate('payments');
             toast('旧アプリのデータを読み込みました');
+          }
+        },
+      })
+    );
+  }
+
+  // ---- 旧・資産管理アプリの取り込み ----
+
+  function assetsLegacyFlow() {
+    const s = openSheet({
+      title: '旧・資産管理アプリのバックアップ',
+      description: 'バックアップの JSON テキストを貼り付けるか、ファイルを選んでください。',
+      className: 'sheet-form',
+    });
+    const ta = h('textarea', {
+      class: 'field-textarea paste-area',
+      rows: 6,
+      placeholder: '{"holdings":[…],"history":[…],"prices":{…},"lastTotal":…}',
+      'aria-label': 'バックアップのテキスト',
+      autocomplete: 'off',
+      autocapitalize: 'off',
+      spellcheck: 'false',
+    });
+    const file = h('input', { type: 'file', accept: 'application/json,.json,.txt,text/plain', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true' });
+    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0];
+      file.value = '';
+      if (f) ta.value = await f.text();
+    });
+    s.body.append(
+      ta,
+      h('div', { class: 'button-row' }, btn('ファイルを選ぶ', { icon: 'upload', size: 'small', onClick: () => file.click() })),
+      file,
+      err,
+      h('p', { class: 'form-hint', text: '次の画面で内容を確認してから読み込みます。データはこの端末の中だけで変換されます。' })
+    );
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('確認へ', {
+        variant: 'primary',
+        onClick: () => {
+          const r = MT.assetsLegacy.parse(ta.value);
+          if (!r.ok) {
+            err.textContent = r.error;
+            err.hidden = false;
+            return;
+          }
+          s.close();
+          assetsLegacyConfirm(r.obj);
+        },
+      })
+    );
+  }
+
+  /** 読み込む前の確認:はっきりしない点を選び、変換結果を見てから読み込む */
+  function assetsLegacyConfirm(obj) {
+    const L = MT.assetsLegacy;
+    const info = L.analyze(obj);
+    const a = store.get().assets;
+    const fxRate = a.fx.rate || a.settings.fxManual || null;
+    const { segmented, field } = MT.forms;
+    const s = openSheet({ title: '読み込む内容の確認', className: 'sheet-form' });
+    const opts = { fundUnit: info.fundGuess, usAvg: 'yen', fxRate };
+    const result = h('div');
+    const list = (items, cls = '') => h('ul', { class: `report-list ${cls}`.trim() }, items.map((t) => h('li', { text: t })));
+
+    function draw() {
+      let res;
+      try {
+        res = L.convert(obj, store.get(), opts);
+      } catch (e) {
+        result.replaceChildren(h('p', { class: 'field-error', text: '変換中に問題が起きました。バックアップの中身を確認してください。' }));
+        return null;
+      }
+      const c = res.report.counts;
+      result.replaceChildren();
+      add(
+        result,
+        list([`保有 ${c.holdings}件(うち NISA ${c.nisa}件は読み込み後に旧/新を選び直し)`, `履歴 ${c.history}日分`, `価格 ${c.priced}件`, `手入力の資産 ${c.keptManual}件はそのまま残します`]),
+        h('h3', { class: 'form-section-title', text: `変換できなかった項目(${res.report.issues.length}件)` }),
+        res.report.issues.length ? list(res.report.issues, 'is-issue') : h('p', { class: 'form-hint', text: 'ありません。' }),
+        res.report.notes.length ? [h('h3', { class: 'form-section-title', text: 'お知らせ' }), list(res.report.notes)] : null
+      );
+      return res;
+    }
+
+    const choices = [];
+    if (info.funds) {
+      const ex = info.fundExample;
+      const seg = segmented(
+        [
+          { value: 'raw', label: '口数そのまま(1万で割る)' },
+          { value: 'asis', label: 'すでに口数÷1万' },
+        ],
+        opts.fundUnit,
+        {
+          label: '投資信託の数量の単位',
+          onChange: (v) => {
+            opts.fundUnit = v;
+            draw();
+          },
+        }
+      );
+      choices.push(field('投資信託の数量(旧アプリ)', seg.el, `${info.guessReason}。例:${ex.name} の数量 ${U.formatNumber(ex.quantity, 6)}`));
+    }
+    if (info.us) {
+      const ex = info.usExample;
+      const seg = segmented(
+        [
+          { value: 'yen', label: '円' },
+          { value: 'usd', label: fxRate ? `ドル(×${fxRate}で円に)` : 'ドル(USD/JPY 未設定)' },
+        ],
+        'yen',
+        {
+          label: '米国株の平均取得単価の通貨',
+          onChange: (v) => {
+            opts.usAvg = v;
+            draw();
+          },
+        }
+      );
+      choices.push(field('米国株の平均取得単価(旧アプリ)', seg.el, `例:${ex.name} の平均取得単価 ${U.formatNumber(ex.avgPrice || 0, 4)}${ex.price ? `・旧アプリの価格 ${U.formatNumber(ex.price, 4)}` : ''}`));
+    }
+    s.body.append(...choices, result, h('p', { class: 'sheet-text', text: '資産管理の「保有」と「履歴」が読み込む内容に置き換わります。上書き前のデータは「直前のデータに戻す」で戻せます。' }));
+    draw();
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('読み込む', {
+        variant: 'primary',
+        onClick: () => {
+          const res = draw();
+          if (!res) return;
+          if (store.replaceAll(res.data, '旧・資産管理アプリの読み込み')) {
+            s.close();
+            MT.app.navigate('assets');
+            toast('旧アプリのデータを読み込みました');
+            if (res.report.counts.nisa) MT.assetsUI.openNisaReviewSheet();
           }
         },
       })

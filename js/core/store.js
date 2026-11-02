@@ -11,13 +11,14 @@
  *
  * データの形を変えるときは SCHEMA_VERSION を上げ、addMigration() で古い形からの変換を登録する。
  *   v1 → v2:支払い管理(payments)を追加(js/features/payments/model.js)
+ *   v2 → v3:資産管理(assets)を追加(js/features/assets/model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';
@@ -286,9 +287,11 @@
     return r;
   }
 
-  function exportJSON() {
+  /** 書き出し用の JSON。extra に渡したもの(価格取得の URL など)は、別の項目として足す */
+  function exportJSON(extra) {
     const out = JSON.parse(JSON.stringify(data));
     out.meta.exportedAt = new Date().toISOString();
+    if (extra) Object.assign(out, extra);
     return JSON.stringify(out, null, 2);
   }
 

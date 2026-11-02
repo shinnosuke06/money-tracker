@@ -16,6 +16,7 @@ require('../js/core/store.js');
 require('../js/features/monthly/model.js');
 require('../js/features/payments/model.js');
 require('../js/features/payments/legacy.js');
+require('../js/features/assets/model.js'); // v2 → v3 の移行
 require('../js/data/sample.js');
 
 const { util: U, store, monthlyModel: M, paymentsModel: P, paymentsLegacy: L, sample } = globalThis.MT;
@@ -44,7 +45,7 @@ function sumCategories(t, key) {
   return Object.values(t.byCategory).reduce((s, c) => s + c[key], 0);
 }
 
-test('段階1(v1)のデータを v2 に移行しても月末記録は変わらず、現金区分の項目が口座になる', () => {
+test('段階1(v1)のデータを移行しても月末記録は変わらず、現金区分の項目が口座になる', () => {
   const v1 = {
     app: 'money-tracker',
     schemaVersion: 1,
@@ -68,7 +69,7 @@ test('段階1(v1)のデータを v2 に移行しても月末記録は変わら�
   const res = store.prepare(v1);
   assert.equal(res.ok, true);
   assert.equal(res.migrated, true);
-  assert.equal(res.data.schemaVersion, 2);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION); // v1 → v2 → … と続けて移行
   assert.deepEqual(res.data.monthly.records['2026-09'].values, { a: 2000 });
   assert.equal(res.data.monthly.records['2026-09'].memo, 'メモ');
   assert.deepEqual(

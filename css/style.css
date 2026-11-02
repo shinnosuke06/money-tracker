@@ -2077,3 +2077,255 @@ details.ended > summary {
   min-height: 140px;
   font-family: ui-monospace, Menlo, monospace;
 }
+
+/* =========================================================
+   段階3:資産管理
+   ========================================================= */
+
+.is-pos {
+  color: var(--positive);
+}
+
+.kv-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+}
+.kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.kv:last-child {
+  border-bottom: 0;
+}
+.kv-label {
+  color: var(--text-2);
+  min-width: 0;
+}
+.kv-label small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.kv-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.btn.is-busy {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.chart-pie {
+  height: 300px;
+}
+
+.group-sum {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pay-name .code {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.chip-soft {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.asset-list .pay-amount small.is-neg,
+.asset-list .pay-amount small.is-pos {
+  font-weight: 600;
+}
+
+.nisa-box {
+  gap: 4px;
+}
+.nisa-sub {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.sum-row .hist-month small {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 配当・優待のカレンダー */
+.cal-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.cal-month {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.cal-month.is-current {
+  background: var(--accent-soft);
+}
+.cal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.cal-name {
+  font-weight: 700;
+}
+.cal-total {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cal-items {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cal-items li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.cal-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cal-items .num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cal-tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.cal-tag.tag-div {
+  box-shadow: inset 3px 0 0 var(--series-1);
+}
+.cal-tag.tag-rec {
+  box-shadow: inset 3px 0 0 var(--series-2);
+}
+.cal-tag.tag-arr {
+  box-shadow: inset 3px 0 0 var(--series-3);
+}
+.cal-empty {
+  margin: 4px 0 0;
+}
+
+/* 入力 */
+.form-stack {
+  display: grid;
+  gap: 12px;
+}
+.input-with-btn {
+  display: flex;
+  gap: 6px;
+}
+.input-with-btn .field-input {
+  flex: 1;
+  min-width: 0;
+}
+.broker-pick {
+  display: grid;
+  gap: 6px;
+}
+.month-chips {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.month-chip {
+  appearance: none;
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.month-chip[aria-pressed="true"] {
+  background: var(--accent);
+  box-shadow: none;
+  color: var(--on-accent);
+}
+.calc-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 13px;
+  color: var(--text-2);
+}
+.calc-preview:empty {
+  display: none;
+}
+.paste-rows {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.paste-rows li {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+.paste-rows li.is-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.paste-rows em {
+  margin-left: 4px;
+  font-style: normal;
+  color: var(--text-3);
+}
+.paste-line {
+  flex: none;
+  color: var(--text-3);
+}
+.map-list {
+  display: grid;
+  gap: 10px;
+}
+.map-row {
+  display: grid;
+  gap: 4px;
+}
+.map-label {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
