@@ -68,6 +68,26 @@
     return `${splitYM(ym).m}月`;
   }
 
+  /** その月の日数 */
+  function daysInMonth(ym) {
+    const { y, m } = splitYM(ym);
+    return new Date(y, m, 0).getDate();
+  }
+
+  /** 曜日(0 = 日曜 … 6 = 土曜) */
+  function weekday(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d).getDay();
+  }
+
+  const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+  /** "11/5(水)" */
+  function dayLabel(dateStr) {
+    const [, m, d] = dateStr.split('-').map(Number);
+    return `${m}/${d}(${WEEKDAYS[weekday(dateStr)]})`;
+  }
+
   /** "10/31"(今年以外は "2025/10/31") */
   function shortDate(dateStr, now = new Date()) {
     if (!isDateStr(dateStr)) return '';
@@ -104,6 +124,13 @@
   /** 入力欄に入れる形(ASCII のマイナス) */
   function yenInput(n) {
     return (n < 0 ? '-' : '') + nf.format(Math.abs(n));
+  }
+
+  /** 万円表示(小数 1 桁):12345 → "1.2万"。計算は円の整数で行い、表示のときだけ丸める */
+  function man(n, withUnit = true) {
+    const v = Math.round(n / 1000) / 10;
+    const s = (v < 0 ? MINUS : '') + Math.abs(v).toFixed(1);
+    return withUnit ? `${s}万` : s;
   }
 
   /** 0.0123 → "+1.2%" */
@@ -313,6 +340,11 @@
     ymAdd,
     ymDiff,
     lastDayOfYM,
+    daysInMonth,
+    weekday,
+    WEEKDAYS,
+    dayLabel,
+    man,
     ymLabel,
     monthLabel,
     shortDate,

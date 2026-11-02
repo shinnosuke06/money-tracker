@@ -2,7 +2,7 @@
  * アプリ本体:下部タブ、画面の切り替え(#/monthly など)、起動処理
  *
  * 画面は MT.views に登録する。
- *   MT.views['monthly']      = { render(container, { entered }), unmount?(), needsAttention?() }
+ *   MT.views['monthly']      = { render(container, { entered }), unmount?({ leaving }), needsAttention?() }
  *   MT.views['monthly/edit'] = { render(container), tab: 'monthly' }  // サブ画面
  *
  * 定期的な処理(支払いの月替わりなど)は MT.maintenance に関数を登録する。
@@ -13,12 +13,13 @@
   const MT = root.MT;
   const { h, icon, toast } = MT.ui;
 
+  // 下部タブは 5 つまで。在庫(ポケカ)・将来予想・設定は「その他」の中にある
   const TABS = [
     { id: 'monthly', label: '月末記録', icon: 'calendar' },
     { id: 'payments', label: '支払い', icon: 'card' },
     { id: 'assets', label: '資産', icon: 'coins' },
-    { id: 'future', label: '将来予想', icon: 'trend' },
-    { id: 'settings', label: '設定', icon: 'settings' },
+    { id: 'sidejob', label: '副業', icon: 'briefcase' },
+    { id: 'more', label: 'その他', icon: 'grid' },
   ];
 
   let currentView = null;
@@ -42,7 +43,7 @@
     const main = root.document.getElementById('view');
 
     const changed = currentPath !== path;
-    if (currentView && currentView.unmount) currentView.unmount();
+    if (currentView && currentView.unmount) currentView.unmount({ leaving: changed }); // leaving: 別の画面へ移るとき true
     main.replaceChildren();
     if (globalNotice) main.append(globalNotice);
     view.render(main, { entered: changed }); // entered: 別の画面から来たとき true

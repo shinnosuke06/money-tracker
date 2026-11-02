@@ -1,7 +1,7 @@
 /*
  * 入力フォームの共通部品(どの機能のダイアログでも使う)
- *   selectEl / segmented / ymPicker / monthChips / checkbox / textInput / memoArea /
- *   field / formFoot / errorLine / confirmDelete
+ *   selectEl / segmented / ymPicker / monthChips / multiChips / choicePicker / checkbox / textInput /
+ *   memoArea / dateInput / field / formFoot / errorLine / confirmDelete
  */
 (function (root) {
   'use strict';
@@ -82,6 +82,59 @@
     return { el: h('div', { class: 'month-chips', role: 'group', 'aria-label': label }, buttons), value };
   }
 
+  /** 複数選べるボタンの並び(曜日など)。options: [{ value, label }] */
+  function multiChips(options, selected, { label = '', onChange } = {}) {
+    const chosen = new Set(selected || []);
+    const buttons = options.map((o) => {
+      const b = h('button', {
+        type: 'button',
+        class: 'month-chip',
+        'aria-pressed': String(chosen.has(o.value)),
+        text: o.label,
+        onClick: () => {
+          if (chosen.has(o.value)) chosen.delete(o.value);
+          else chosen.add(o.value);
+          b.setAttribute('aria-pressed', String(chosen.has(o.value)));
+          if (onChange) onChange(value());
+        },
+      });
+      return b;
+    });
+    const value = () => options.map((o) => o.value).filter((v) => chosen.has(v));
+    return { el: h('div', { class: 'month-chips', role: 'group', 'aria-label': label, style: `grid-template-columns: repeat(${Math.min(options.length, 7)}, minmax(0, 1fr))` }, buttons), value };
+  }
+
+  /**
+   * 過去の入力から選ぶ(「新しく入力…」で自由に入力)。names が空なら入力欄だけ。
+   * @returns {{el, value(): string, onChange(fn)}}
+   */
+  function choicePicker(names, value, { label = '名前', placeholder = '', maxLength = 60 } = {}) {
+    const NEW = '__new__';
+    const listeners = [];
+    const fire = () => listeners.forEach((f) => f());
+    const input = textInput(names.length ? '' : value, { maxlength: maxLength, placeholder, 'aria-label': `${label}(入力)` });
+    input.addEventListener('input', fire);
+    if (!names.length) return { el: input, value: () => input.value.trim(), onChange: (f) => listeners.push(f), input };
+    const initial = value && names.includes(value) ? value : value ? NEW : NEW;
+    const sel = selectEl([{ value: NEW, label: '新しく入力…' }, ...names.map((n) => ({ value: n, label: n }))], initial, { 'aria-label': label });
+    if (initial === NEW) input.value = value || '';
+    const sync = () => {
+      input.hidden = sel.value !== NEW;
+    };
+    sel.addEventListener('change', () => {
+      sync();
+      if (!input.hidden) input.focus();
+      fire();
+    });
+    sync();
+    return { el: h('div', { class: 'broker-pick' }, sel, input), value: () => (sel.value === NEW ? input.value.trim() : sel.value), onChange: (f) => listeners.push(f), input };
+  }
+
+  /** 日付の入力(YYYY-MM-DD) */
+  function dateInput(value, label = '日付') {
+    return h('input', { class: 'field-input', type: 'date', value: value || U.todayStr(), 'aria-label': label, required: true });
+  }
+
   function checkbox(label, checked) {
     const input = h('input', { type: 'checkbox', checked });
     return { el: h('label', { class: 'check' }, input, h('span', { text: label })), input };
@@ -143,5 +196,5 @@
     });
   }
 
-  MT.forms = { selectEl, segmented, ymPicker, monthChips, checkbox, textInput, memoArea, field, formFoot, errorLine, confirmDelete };
+  MT.forms = { selectEl, segmented, ymPicker, monthChips, multiChips, choicePicker, dateInput, checkbox, textInput, memoArea, field, formFoot, errorLine, confirmDelete };
 })(window);

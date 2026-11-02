@@ -13,6 +13,12 @@
       src: 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js',
       integrity: 'sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ',
     },
+    // 旧・ポケカ管理アプリのバックアップ("LZ:" で始まるもの)の展開に使う
+    lzstring: {
+      global: 'LZString',
+      src: 'https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js',
+      integrity: 'sha384-0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7',
+    },
   };
 
   const pending = {};

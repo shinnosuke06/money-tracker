@@ -5,6 +5,8 @@
  *             先月分が履歴に入り、「済」が外れ、変動費が空欄になる。
  * 資産管理:証券A・証券B の架空の銘柄(コードも実在しない形)と手入力の資産、推移の履歴。
  *           米国銘柄Q はわざと価格なし(「価格未取得」の表示を試せる)。
+ * ポケカ在庫:商品A〜D(商品D は相場なし → 購入単価で評価)。
+ * 副業収入:依頼元A(月水金)・依頼元B(土)の 6 か月分の記録。今月は途中まで。
  */
 (function (root) {
   'use strict';
@@ -202,6 +204,89 @@
     return a;
   }
 
+  // ---- ポケカ在庫(すべて架空) ----
+
+  function buildInventory(now) {
+    const day = (n) => U.todayStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n));
+    const items = [
+      {
+        id: 'smp_inv_a', name: '商品A', quantity: 3, unitCost: 5500, priority: 'first',
+        prices: [[60, 6200, '買取店A'], [40, 6800, '買取店B'], [20, 7400, '買取店A'], [5, 7100, '']],
+        sales: [[30, 1, 7000, 5500]],
+      },
+      { id: 'smp_inv_b', name: '商品B', quantity: 2, unitCost: 12000, priority: 'ifNeeded', prices: [[45, 11500, '買取店A'], [10, 10800, '買取店A']], sales: [] },
+      {
+        id: 'smp_inv_c', name: '商品C', quantity: 6, unitCost: 900, priority: 'first',
+        prices: [[50, 1500, '買取店B'], [15, 1800, '買取店B']],
+        sales: [[25, 2, 1600, 900]],
+      },
+      { id: 'smp_inv_d', name: '商品D', quantity: 1, unitCost: 3000, priority: 'keep', prices: [], sales: [], memo: '相場の記録がないので、購入単価で評価しています(サンプル)' },
+    ];
+    return {
+      items: items.map((x) =>
+        MT.inventoryModel.cleanItem({
+          ...x,
+          prices: x.prices.map(([n, price, store], i) => ({ id: `${x.id}_p${i}`, date: day(n), price, store })),
+          sales: x.sales.map(([n, quantity, price, costAtSale], i) => ({ id: `${x.id}_s${i}`, date: day(n), quantity, price, costAtSale })),
+        })
+      ),
+      settings: { reflectItemId: null },
+    };
+  }
+
+  // ---- 副業収入(すべて架空) ----
+
+  function buildSidejob(now) {
+    const today = U.todayStr(now);
+    const cur = U.currentYM(now);
+    const clients = [
+      {
+        id: 'smp_cli_a', name: '依頼元A', baseAmount: 8000,
+        tasks: [
+          { id: 'smp_t_x', name: '作業項目X', amount: 2000, isDefault: true },
+          { id: 'smp_t_y', name: '作業項目Y', amount: 1500, isDefault: false },
+          { id: 'smp_t_z', name: '作業項目Z', amount: 3000, isDefault: true },
+        ],
+        weekdays: [1, 3, 5],
+        payment: { incomeId: 'smp_i_side', timing: 'next', day: 25 },
+        memo: '',
+      },
+      {
+        id: 'smp_cli_b', name: '依頼元B', baseAmount: 10000,
+        tasks: [
+          { id: 'smp_t_p', name: '作業項目P', amount: 2500, isDefault: true },
+          { id: 'smp_t_q', name: '作業項目Q', amount: 1000, isDefault: false },
+        ],
+        weekdays: [6],
+        payment: { incomeId: null, timing: 'next', day: null },
+        memo: '',
+      },
+    ].map((c) => MT.sidejobModel.cleanClient(c));
+    const records = [];
+    let n = 0;
+    for (let k = -5; k <= 0; k++) {
+      const ym = U.ymAdd(cur, k);
+      for (const c of clients) {
+        const days = MT.sidejobModel.plannedDates({ schedule: {} }, ym, c);
+        days.forEach((date, i) => {
+          if (date >= today) return; // 今日より先はまだ働いていない
+          if ((i + k) % 5 === 4) return; // ときどき休み
+          const items = c.tasks.filter((t) => t.isDefault).map((t) => ({ name: t.name, amount: t.amount }));
+          if (i % 3 === 1) {
+            const extra = c.tasks.find((t) => !t.isDefault);
+            items.push({ name: extra.name, amount: extra.amount });
+          }
+          const daysAgo = Math.round((now - new Date(date + 'T00:00:00')) / 86400000);
+          records.push({ id: `smp_rec_${n++}`, date, clientId: c.id, base: c.baseAmount, items, content: items.map((x) => x.name).join('、'), memo: '', confirmed: k < 0 || daysAgo > 10 });
+        });
+      }
+    }
+    // 今月、依頼元A の次の予定日を 1 日休みにしておく
+    const next = MT.sidejobModel.plannedDates({ schedule: {} }, cur, clients[0]).find((d) => d > today);
+    const schedule = next ? { [cur]: { [clients[0].id]: { off: [next], extra: [] } } } : {};
+    return { clients, records: records.map((r) => MT.sidejobModel.cleanRecord(r)), schedule };
+  }
+
   function build(now = new Date()) {
     const data = MT.store.createEmpty(now);
     const last = U.ymAdd(U.currentYM(now), -2);
@@ -227,6 +312,8 @@
     });
     data.payments = buildPayments(now);
     data.assets = buildAssets(now);
+    data.inventory = buildInventory(now);
+    data.sidejob = buildSidejob(now);
     return data;
   }
 

@@ -32,7 +32,12 @@
     });
 
     container.append(
-      h('header', { class: 'page-head' }, h('h1', { class: 'page-title', text: '設定' })),
+      h(
+        'header',
+        { class: 'page-head' },
+        h('a', { class: 'back-link', href: '#/more' }, icon('back'), h('span', { text: 'その他' })),
+        h('h1', { class: 'page-title page-title-sub', text: '設定' })
+      ),
 
       h(
         'section',
@@ -54,8 +59,16 @@
       h(
         'section',
         { class: 'card' },
+        h('h2', { class: 'card-title', text: '副業・在庫' }),
+        MT.forms.field('在庫(ポケカ)の評価額の反映先(月末記録の項目)', MT.inventoryUI.reflectTargetSelect()),
+        h('div', { class: 'button-row' }, btn('副業の依頼元の設定(最大5件)', { onClick: () => MT.app.navigate('sidejob/clients') }))
+      ),
+
+      h(
+        'section',
+        { class: 'card' },
         h('h2', { class: 'card-title', text: 'サンプルデータ' }),
-        h('p', { text: '架空の項目と 6 か月分の金額、支払い管理・資産管理の例を読み込んで、動きを試せます。今のデータは上書きされます。' }),
+        h('p', { text: '架空の項目と 6 か月分の金額、支払い管理・資産管理・在庫・副業の例を読み込んで、動きを試せます。今のデータは上書きされます。' }),
         h('div', { class: 'button-col' }, btn('サンプルを読み込む', { onClick: loadSampleFlow }))
       ),
 
@@ -73,6 +86,19 @@
         h('h2', { class: 'card-title', text: '旧・資産管理アプリから移行' }),
         h('p', { text: '旧アプリのバックアップ(JSON)の保有銘柄・履歴・価格を、資産管理のデータに変換します。読み込む前に、変換結果と、変換できなかった項目の一覧を確認できます。' }),
         h('div', { class: 'button-col' }, btn('旧・資産管理アプリのバックアップを読み込む', { icon: 'upload', onClick: assetsLegacyFlow }))
+      ),
+
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card-title', text: '旧・副業管理アプリ / 旧・ポケカ管理アプリから移行' }),
+        h('p', { text: '旧アプリのバックアップ(JSON や .txt)を読み込みます。読み込む前に、変換結果と、変換できなかった項目の一覧を確認できます。' }),
+        h(
+          'div',
+          { class: 'button-col' },
+          btn('旧・副業管理アプリのバックアップを読み込む', { icon: 'upload', onClick: sidejobLegacyFlow }),
+          btn('旧・ポケカ管理アプリのバックアップを読み込む', { icon: 'upload', onClick: inventoryLegacyFlow })
+        )
       ),
 
       h(
@@ -125,7 +151,7 @@
         h('div', { class: 'button-col' }, btn('すべて削除する', { variant: 'danger', onClick: clearFlow }))
       ),
 
-      h('p', { class: 'app-version', text: 'マネートラッカー 段階3(資産管理)' })
+      h('p', { class: 'app-version', text: 'マネートラッカー 段階4(ポケカ在庫・副業収入)' })
     );
   }
 
@@ -577,6 +603,137 @@
     );
   }
 
+  // ---- 旧・副業管理アプリ / 旧・ポケカ管理アプリ ----
+
+  /** バックアップを貼り付ける(またはファイルを選ぶ)ダイアログ。onNext(text) が false 以外を返したら閉じる */
+  function pasteSheet({ title, placeholder, onNext }) {
+    const s = openSheet({ title, description: 'バックアップのテキストを貼り付けるか、ファイルを選んでください。', className: 'sheet-form' });
+    const ta = h('textarea', { class: 'field-textarea paste-area', rows: 6, placeholder, 'aria-label': 'バックアップのテキスト', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    const file = h('input', { type: 'file', accept: 'application/json,.json,.txt,text/plain', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true' });
+    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0];
+      file.value = '';
+      if (f) ta.value = await f.text();
+    });
+    s.body.append(
+      ta,
+      h('div', { class: 'button-row' }, btn('ファイルを選ぶ', { icon: 'upload', size: 'small', onClick: () => file.click() })),
+      file,
+      err,
+      h('p', { class: 'form-hint', text: '次の画面で内容を確認してから読み込みます。データはこの端末の中だけで変換されます。' })
+    );
+    const next = btn('確認へ', { variant: 'primary' });
+    next.addEventListener('click', async () => {
+      next.disabled = true;
+      try {
+        const msg = await onNext(ta.value);
+        if (msg) {
+          err.textContent = msg;
+          err.hidden = false;
+        } else s.close();
+      } finally {
+        next.disabled = false;
+      }
+    });
+    s.foot.append(btn('キャンセル', { onClick: () => s.close() }), next);
+  }
+
+  /** 変換結果の確認と読み込み */
+  function legacyConfirm({ title, lines, report, replaceText, reason, navigateTo, data }) {
+    const s = openSheet({ title, className: 'sheet-form' });
+    const list = (items, cls = '') => h('ul', { class: `report-list ${cls}`.trim() }, items.map((t) => h('li', { text: t })));
+    add(
+      s.body,
+      list(lines),
+      h('h3', { class: 'form-section-title', text: `変換できなかった項目(${report.issues.length}件)` }),
+      report.issues.length ? list(report.issues, 'is-issue') : h('p', { class: 'form-hint', text: 'ありません。' }),
+      report.notes.length ? [h('h3', { class: 'form-section-title', text: 'お知らせ' }), list(report.notes)] : null,
+      h('p', { class: 'sheet-text', text: `${replaceText}上書き前のデータは「直前のデータに戻す」で戻せます。` })
+    );
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('読み込む', {
+        variant: 'primary',
+        onClick: () => {
+          if (store.replaceAll(data, reason)) {
+            s.close();
+            MT.app.navigate(navigateTo);
+            toast('旧アプリのデータを読み込みました');
+          }
+        },
+      })
+    );
+  }
+
+  const FORMAT_LABEL = { settingsFirst: '[設定, 記録] の形', recordsFirst: '[記録, 設定] の形', object: '{ jobs, settings } の形' };
+
+  function sidejobLegacyFlow() {
+    pasteSheet({
+      title: '旧・副業管理アプリのバックアップ',
+      placeholder: '[["依頼元A",1.2,"…","依頼元B",0.8,"…"],[[261102,0,1.2,1,1], …]] など',
+      onNext: (textValue) => {
+        const L = MT.sidejobLegacy;
+        const p = L.parse(textValue);
+        if (!p.ok) return p.error;
+        let res;
+        try {
+          res = L.convert(p, store.get());
+        } catch (e) {
+          return '変換中に問題が起きました。バックアップの中身を確認してください。';
+        }
+        const c = res.report.counts;
+        legacyConfirm({
+          title: '読み込む内容の確認(副業)',
+          lines: [`形式:${FORMAT_LABEL[p.format]}`, `依頼元 ${c.clients}件`, `記録 ${c.records}件(入金確認済み ${c.confirmed}件)`, `記録の合計 ${U.man(c.total)}(${U.yen(c.total)}円)`],
+          report: res.report,
+          replaceText: '副業の依頼元・記録・予定は、読み込む内容に置き換わります。',
+          reason: '旧・副業管理アプリの読み込み',
+          navigateTo: 'sidejob',
+          data: res.data,
+        });
+        return null;
+      },
+    });
+  }
+
+  function inventoryLegacyFlow() {
+    pasteSheet({
+      title: '旧・ポケカ管理アプリのバックアップ',
+      placeholder: 'LZ:… または 英数字の長いテキスト',
+      onNext: async (textValue) => {
+        const L = MT.inventoryLegacy;
+        let lz = null;
+        if (L.needsLz(textValue)) {
+          try {
+            lz = await MT.libs.load('lzstring');
+          } catch (e) {
+            lz = null;
+          }
+        }
+        const dec = L.decode(textValue, lz);
+        if (!dec.ok) return dec.error;
+        let res;
+        try {
+          res = L.convert(dec.obj, store.get());
+        } catch (e) {
+          return '変換中に問題が起きました。バックアップの中身を確認してください。';
+        }
+        const c = res.report.counts;
+        legacyConfirm({
+          title: '読み込む内容の確認(ポケカ在庫)',
+          lines: [`商品 ${c.items}件`, `相場の記録 ${c.prices}件`, `売却の記録 ${c.sales}件`],
+          report: res.report,
+          replaceText: '在庫の商品は、読み込む内容に置き換わります(反映先の設定は残ります)。',
+          reason: '旧・ポケカ管理アプリの読み込み',
+          navigateTo: 'inventory',
+          data: res.data,
+        });
+        return null;
+      },
+    });
+  }
+
   // ---- 元に戻す・全削除 ----
 
   async function restoreFlow() {
@@ -605,6 +762,6 @@
   }
 
   MT.views = MT.views || {};
-  MT.views.settings = { render };
+  MT.views.settings = { render, tab: 'more' };
   MT.settingsView = { loadSampleFlow };
 })(window);

@@ -17,6 +17,8 @@ require('../js/features/monthly/model.js');
 require('../js/features/payments/model.js');
 require('../js/features/payments/legacy.js');
 require('../js/features/assets/model.js'); // v2 → v3 の移行
+require('../js/features/inventory/model.js'); // v3 → v4 の移行
+require('../js/features/sidejob/model.js');
 require('../js/data/sample.js');
 
 const { util: U, store, monthlyModel: M, paymentsModel: P, paymentsLegacy: L, sample } = globalThis.MT;

@@ -17,9 +17,15 @@
   function placeholder(key) {
     const plan = PLANS[key];
     return {
+      tab: 'more',
       render(container) {
         container.append(
-          h('header', { class: 'page-head' }, h('h1', { class: 'page-title', text: plan.title })),
+          h(
+            'header',
+            { class: 'page-head' },
+            h('a', { class: 'back-link', href: '#/more' }, MT.ui.icon('back'), h('span', { text: 'その他' })),
+            h('h1', { class: 'page-title page-title-sub', text: plan.title })
+          ),
           h(
             'section',
             { class: 'card placeholder' },

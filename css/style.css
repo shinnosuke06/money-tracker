@@ -995,8 +995,24 @@ button {
   align-items: center;
   gap: 6px;
 }
+/* compact:計算ボタンは入力中だけ、下に浮かせて出す(出し入れで画面がずれないように) */
+.amount-field.is-compact {
+  position: relative;
+}
 .amount-field.is-compact .amount-tools {
   display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--line);
+}
+.amount-field.is-compact .amount-calc {
+  flex: none;
+  padding: 0 4px;
 }
 .amount-field.is-compact:focus-within .amount-tools {
   display: flex;
@@ -2328,4 +2344,441 @@ details.ended > summary {
   font-size: 13px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   段階4:ポケカ在庫・副業収入・その他
+   ========================================================= */
+
+/* その他 */
+.more-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.more-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  text-decoration: none;
+}
+.more-list li:last-child .more-row {
+  border-bottom: 0;
+}
+.more-row:active {
+  background: var(--surface-2);
+}
+.more-icon {
+  width: 26px;
+  height: 26px;
+  color: var(--accent-text);
+}
+.more-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.more-title {
+  font-weight: 700;
+}
+.more-sub {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.more-chevron {
+  color: var(--text-3);
+}
+
+/* 在庫 */
+.inv-row {
+  display: grid;
+  border-bottom: 1px solid var(--line);
+}
+.inv-row:last-child {
+  border-bottom: 0;
+}
+.inv-row .pay-main {
+  padding-left: 16px;
+}
+.inv-row.is-empty .pay-name {
+  color: var(--text-3);
+}
+.inv-qty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px 10px;
+}
+.step-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.step-btn:active:not(:disabled) {
+  background: var(--surface-3);
+}
+.step-btn:disabled {
+  opacity: 0.35;
+}
+.qty-num {
+  min-width: 3.5em;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.chart-small {
+  height: 220px;
+}
+.detail-list.tappable li {
+  padding: 0;
+}
+.detail-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 2px;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+}
+.detail-btn .num {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.is-warn-text {
+  color: var(--danger) !important;
+  font-weight: 600;
+}
+
+/* 副業:記録の入力 */
+.task-list {
+  display: grid;
+  gap: 6px;
+}
+.task-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.task-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.task-name input,
+.check-inline input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.check-inline {
+  margin-top: 0;
+  align-self: center;
+  white-space: nowrap;
+}
+.record-total {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 副業:一覧 */
+.list-tools {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+.month-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.list-tools .month-switch {
+  justify-self: center;
+}
+.month-switch-label {
+  min-width: 7.5em;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+}
+.filter-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.filter-row::-webkit-scrollbar {
+  display: none;
+}
+.filter-chip {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.filter-chip[aria-pressed="true"] {
+  background: var(--accent);
+  box-shadow: none;
+  color: var(--on-accent);
+}
+.kv.is-dim {
+  opacity: 0.45;
+}
+.kv-total {
+  border-top: 2px solid var(--line-strong);
+  font-size: 16px;
+}
+.round-check {
+  appearance: none;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.round-check .icon {
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 2px var(--line-strong);
+  color: transparent;
+}
+.round-check.is-on .icon {
+  background: var(--positive);
+  box-shadow: none;
+  color: #fff;
+}
+.job-row .pay-main {
+  padding-right: 4px;
+}
+.trash-btn {
+  align-self: center;
+  margin-right: 6px;
+  color: var(--text-3);
+}
+.job-client {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+.job-content {
+  color: var(--text-2);
+}
+
+/* スクショモード:タブと操作ボタンを隠す */
+html.is-shot .tabbar,
+html.is-shot #toast-root {
+  display: none !important;
+}
+html.is-shot .view {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 24px);
+}
+.shot {
+  padding: 18px 4px 8px;
+}
+.shot-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.shot-client {
+  margin: 4px 0 0;
+  font-size: 15px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.shot-total {
+  margin: 10px 0 12px;
+  font-size: 15px;
+}
+.shot-total strong {
+  font-size: 26px;
+}
+.shot-yen {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.shot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.shot-table td {
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.shot-date {
+  white-space: nowrap;
+  width: 5.6em;
+}
+.shot-amount {
+  white-space: nowrap;
+  text-align: right;
+  font-weight: 700;
+  width: 4.2em;
+}
+.shot-content {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.shot-exit {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
+}
+
+/* 副業:予想額とカレンダー */
+.forecast {
+  gap: 2px;
+}
+.fc-line {
+  font-size: 12px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.fc-line.is-planned {
+  color: var(--text-3);
+  opacity: 0.85;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+}
+.cal-wd {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+.cal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.cal-cell.is-blank {
+  cursor: default;
+}
+.cal-cell.is-planned {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+.cal-cell.is-extra {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+.cal-cell.is-off .cal-day {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.cal-cell.is-none {
+  color: var(--text-2);
+}
+.cal-cell.is-today {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+.cal-mark {
+  position: absolute;
+  bottom: 3px;
+  font-size: 7px;
+  color: var(--positive);
+}
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.cal-legend .lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cal-legend .lg::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+.lg-planned::before {
+  background: var(--accent-soft);
+}
+.lg-off::before {
+  background: var(--surface-2);
+}
+.lg-extra::before {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.link-block {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.cal-switch {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 4px;
 }

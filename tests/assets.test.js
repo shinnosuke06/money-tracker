@@ -19,6 +19,8 @@ require('../js/features/payments/model.js');
 require('../js/features/assets/model.js');
 require('../js/features/assets/prices.js');
 require('../js/features/assets/legacy.js');
+require('../js/features/inventory/model.js'); // v3 → v4 の移行
+require('../js/features/sidejob/model.js');
 require('../js/data/sample.js');
 
 const { util: U, store, secrets, monthlyModel: M, assetsModel: A, assetPrices: PR, assetsLegacy: L, sample } = globalThis.MT;
@@ -52,7 +54,7 @@ test('段階2(v2)のデータを v3 に移行しても、月末記録と支払�
   const res = store.prepare(JSON.parse(JSON.stringify(v2)));
   assert.equal(res.ok, true);
   assert.equal(res.migrated, true);
-  assert.equal(res.data.schemaVersion, 3);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION); // v3 以降まで続けて移行
   assert.equal(res.data.monthly.items[0].name, '架空銀行');
   assert.equal(res.data.payments.memo, '支払いのメモ');
   assert.deepEqual(res.data.assets.holdings, []);
@@ -63,7 +65,7 @@ test('段階1(v1)のデータも v3 まで続けて移行できる', () => {
   const v1 = { app: 'money-tracker', schemaVersion: 1, meta: {}, monthly: { categories: [{ id: 'cat_cash', name: '現金' }], items: [{ id: 'a', categoryId: 'cat_cash', name: '架空銀行' }], records: { '2026-09': { values: { a: 1 }, confirmed: {}, memo: '' } } } };
   const res = store.prepare(v1);
   assert.equal(res.ok, true);
-  assert.equal(res.data.schemaVersion, 3);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
   assert.equal(res.data.payments.accounts.length, 1);
   assert.ok(res.data.assets);
 });
