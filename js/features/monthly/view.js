@@ -448,17 +448,16 @@
 
     const refLine = h('p', { class: 'amount-ref' });
     const statusLine = h('p', { class: 'amount-status', hidden: true });
-    const input = h('input', {
-      class: 'amount-input',
-      type: 'text',
-      inputmode: 'numeric',
-      autocomplete: 'off',
-      enterkeyhint: 'next',
-      placeholder: '0',
-      'aria-label': '金額(円)',
-    });
-    const signBtn = btn('±', { className: 'sign-btn', ariaLabel: 'プラスとマイナスを切り替え', keepFocus: true });
     const preview = h('p', { class: 'amount-preview', 'aria-live': 'polite' });
+    const field = MT.ui.amountField({
+      size: 'large',
+      onChange: () => {
+        err.hidden = true;
+        updatePreview();
+      },
+    });
+    const input = field.input;
+    input.setAttribute('enterkeyhint', 'next');
     const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
     const sameBtn = btn('前月と同じ', { size: 'small', keepFocus: true });
     const clearBtn = btn('空欄にする', { size: 'small', keepFocus: true });
@@ -468,7 +467,7 @@
       { class: 'amount-form', novalidate: true },
       refLine,
       statusLine,
-      h('div', { class: 'amount-row' }, signBtn, input, h('span', { class: 'amount-unit', text: '円' })),
+      field.el,
       preview,
       err,
       h('div', { class: 'chip-row' }, sameBtn, clearBtn)
@@ -508,7 +507,7 @@
       statusLine.hidden = !carried;
       statusLine.textContent = carried ? '前月からコピーした値です。変わっていなければ、そのまま保存で確定します。' : '';
 
-      input.value = v === null ? '' : U.yenInput(v);
+      field.setValue(v);
       sameBtn.disabled = prevValue === null;
       nextId = M.nextItemId(m, id);
       nextBtn.hidden = !nextId;
@@ -518,16 +517,11 @@
     }
 
     function focusInput() {
-      input.focus();
-      try {
-        input.setSelectionRange(0, input.value.length);
-      } catch (e) {
-        /* 何もしない */
-      }
+      field.focus(true);
     }
 
     function updatePreview() {
-      const r = U.parseYen(input.value);
+      const r = field.result();
       preview.replaceChildren();
       if (!r.ok) return;
       if (r.value === null) {
@@ -540,19 +534,8 @@
       preview.append('前月比 ', h('span', { class: `delta ${cls}`, text: `${U.yenSigned(d)}円` }));
     }
 
-    /** 入力しながら 3 桁区切りにする(カーソルが末尾にあるときだけ) */
-    function reformat() {
-      const raw = input.value;
-      if (input.selectionStart !== raw.length) return;
-      const r = U.parseYen(raw);
-      if (!r.ok || r.value === null) return;
-      const neg = /^\s*[-−ー－‐▲]/.test(raw);
-      const next = (neg ? '-' : '') + U.yen(Math.abs(r.value));
-      if (next !== raw) input.value = next;
-    }
-
     function commit() {
-      const r = U.parseYen(input.value);
+      const r = field.result();
       if (!r.ok) {
         err.textContent = r.error;
         err.hidden = false;
@@ -579,28 +562,13 @@
       }
     }
 
-    input.addEventListener('input', (e) => {
-      if (!e.isComposing) reformat();
-      err.hidden = true;
-      updatePreview();
-    });
-    signBtn.addEventListener('click', () => {
-      const v = input.value.trim();
-      input.value = v.startsWith('-') ? v.slice(1) : '-' + v;
-      updatePreview();
-      input.focus();
-    });
     sameBtn.addEventListener('click', () => {
       if (prevValue === null) return;
-      input.value = U.yenInput(prevValue);
-      err.hidden = true;
-      updatePreview();
+      field.setValue(prevValue);
       focusInput();
     });
     clearBtn.addEventListener('click', () => {
-      input.value = '';
-      err.hidden = true;
-      updatePreview();
+      field.setValue(null);
       input.focus();
     });
     saveBtn.addEventListener('click', save);

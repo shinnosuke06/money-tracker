@@ -6,7 +6,7 @@
   const MT = root.MT;
   const U = MT.util;
   const store = MT.store;
-  const { h, icon, btn, confirmDialog, toast } = MT.ui;
+  const { h, add, icon, btn, confirmDialog, openSheet, toast } = MT.ui;
 
   function formatDateTime(iso) {
     const d = new Date(iso);
@@ -53,8 +53,16 @@
         'section',
         { class: 'card' },
         h('h2', { class: 'card-title', text: 'サンプルデータ' }),
-        h('p', { text: '架空の項目と 6 か月分の金額を読み込んで、動きを試せます。今のデータは上書きされます。' }),
+        h('p', { text: '架空の項目と 6 か月分の金額、支払い管理の例を読み込んで、動きを試せます。今のデータは上書きされます。' }),
         h('div', { class: 'button-col' }, btn('サンプルを読み込む', { onClick: loadSampleFlow }))
+      ),
+
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card-title', text: '旧・支払い管理アプリから移行' }),
+        h('p', { text: '旧アプリのバックアップ(JSON テキスト)を読み込み、支払い管理のデータに変換します。読み込む前に、変換結果と、変換できなかった項目の一覧を確認できます。' }),
+        h('div', { class: 'button-col' }, btn('旧・支払い管理アプリのバックアップを読み込む', { icon: 'upload', onClick: legacyImportFlow }))
       ),
 
       h(
@@ -107,7 +115,7 @@
         h('div', { class: 'button-col' }, btn('すべて削除する', { variant: 'danger', onClick: clearFlow }))
       ),
 
-      h('p', { class: 'app-version', text: 'マネートラッカー 段階1(土台)' })
+      h('p', { class: 'app-version', text: 'マネートラッカー 段階2(支払い管理)' })
     );
   }
 
@@ -209,6 +217,105 @@
       MT.app.navigate('monthly');
       toast('サンプルを読み込みました');
     }
+  }
+
+  // ---- 旧・支払い管理アプリの取り込み ----
+
+  function legacyImportFlow() {
+    const s = openSheet({
+      title: '旧アプリのバックアップを読み込む',
+      description: 'バックアップの JSON テキストを貼り付けるか、ファイルを選んでください。',
+      className: 'sheet-form',
+    });
+    const ta = h('textarea', {
+      class: 'field-textarea paste-area',
+      rows: 6,
+      placeholder: '{"accounts":[…],"payments":[…], …}',
+      'aria-label': 'バックアップのテキスト',
+      autocomplete: 'off',
+      autocapitalize: 'off',
+      spellcheck: 'false',
+    });
+    const file = h('input', { type: 'file', accept: 'application/json,.json,.txt,text/plain', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true' });
+    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+    file.addEventListener('change', async () => {
+      const f = file.files && file.files[0];
+      file.value = '';
+      if (f) ta.value = await f.text();
+    });
+    s.body.append(
+      ta,
+      h('div', { class: 'button-row' }, btn('ファイルを選ぶ', { icon: 'upload', size: 'small', onClick: () => file.click() })),
+      file,
+      err,
+      h('p', { class: 'form-hint', text: '次の画面で変換結果を確認してから読み込みます。データはこの端末の中だけで変換され、どこにも送信されません。' })
+    );
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('変換して確認', {
+        variant: 'primary',
+        onClick: () => {
+          const r = MT.paymentsLegacy.parse(ta.value);
+          if (!r.ok) {
+            err.textContent = r.error;
+            err.hidden = false;
+            return;
+          }
+          let res;
+          try {
+            res = MT.paymentsLegacy.convert(r.obj, store.get());
+          } catch (e) {
+            err.textContent = '変換中に問題が起きました。バックアップの中身を確認してください。';
+            err.hidden = false;
+            return;
+          }
+          s.close();
+          showLegacyReport(res);
+        },
+      })
+    );
+  }
+
+  function showLegacyReport(res) {
+    const { counts: c, accounts, issues, notes } = res.report;
+    const s = openSheet({ title: '読み込む内容の確認', className: 'sheet-form' });
+    const list = (items, cls = '') => h('ul', { class: `report-list ${cls}`.trim() }, items.map((t) => h('li', { text: t })));
+    add(
+      s.body,
+      list([
+        `口座 ${c.banks}件・手元現金 ${c.wallets}件(月末記録の項目とつなぐ ${c.linked}件・新しく項目を作る ${c.created}件)`,
+        `支払い・ローン ${c.bills}件(内訳 ${c.subItems}件)`,
+        `入金予定 ${c.incomes}件`,
+        `特別支出 ${c.specials}件`,
+        `履歴 ${c.history}か月分`,
+      ]),
+      accounts.length
+        ? [
+            h('h3', { class: 'form-section-title', text: '口座' }),
+            list(accounts.map((a) => `${a.label}「${a.name}」:${a.action === 'linked' ? '同じ名前の項目とつなぎます' : '月末記録に項目を作ります'}`)),
+          ]
+        : null,
+      h('h3', { class: 'form-section-title', text: `変換できなかった項目(${issues.length}件)` }),
+      issues.length ? list(issues, 'is-issue') : h('p', { class: 'form-hint', text: 'ありません。' }),
+      notes.length ? [h('h3', { class: 'form-section-title', text: `変換のしかたを変えた項目(${notes.length}件)` }), list(notes)] : null,
+      h('p', {
+        class: 'sheet-text',
+        text: '今の支払い管理のデータは、読み込む内容に置き換わります。月末記録の金額はそのままです(足りない口座だけ項目を追加します)。上書き前のデータは「直前のデータに戻す」で戻せます。',
+      })
+    );
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('読み込む', {
+        variant: 'primary',
+        onClick: () => {
+          if (store.replaceAll(res.data, '旧アプリのバックアップの読み込み')) {
+            s.close();
+            MT.app.navigate('payments');
+            toast('旧アプリのデータを読み込みました');
+          }
+        },
+      })
+    );
   }
 
   // ---- 元に戻す・全削除 ----

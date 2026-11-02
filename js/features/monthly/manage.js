@@ -81,6 +81,12 @@
     ];
   }
 
+  /** 支払い管理の口座としてつないでいる項目か */
+  function isPaymentAccount(itemId) {
+    const p = store.get().payments;
+    return !!(p && p.accounts.some((a) => a.itemId === itemId));
+  }
+
   function renderCategory(m, g, ci) {
     const c = g.category;
     const isFirst = ci === 0;
@@ -91,7 +97,12 @@
         h(
           'li',
           { class: 'edit-row' },
-          h('button', { type: 'button', class: 'edit-name', onClick: () => renameItemFlow(it) }, it.name),
+          h(
+            'button',
+            { type: 'button', class: 'edit-name', onClick: () => renameItemFlow(it) },
+            it.name,
+            isPaymentAccount(it.id) ? h('small', { class: 'edit-sub', text: '支払いの口座' }) : null
+          ),
           moveButtons('item', it.id, i === 0, i === g.items.length - 1, it.name),
           h('button', { type: 'button', class: 'icon-btn', 'aria-label': `「${it.name}」のメニュー`, onClick: () => itemMenu(it) }, icon('more'))
         )
@@ -205,6 +216,7 @@
       title: `「${it.name}」を削除しますか?`,
       message: [
         '過去の月の金額も消え、総資産の計算から外れます。',
+        isPaymentAccount(it.id) ? '支払い管理の口座からも外れ、この口座を指していた支払い・入金は「口座なし」になります。' : null,
         '口座を解約した場合は、削除せずに金額を 0 にすると過去の記録を残せます。',
         '間違えた場合は、設定の「直前のデータに戻す」で元に戻せます。',
       ],

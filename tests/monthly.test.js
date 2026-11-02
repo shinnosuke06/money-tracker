@@ -15,6 +15,7 @@ globalThis.localStorage = {
 require('../js/core/util.js');
 require('../js/core/store.js');
 require('../js/features/monthly/model.js');
+require('../js/features/payments/model.js'); // v1 → v2 の移行が入っている
 require('../js/data/sample.js');
 
 const { util: U, store, monthlyModel: M, sample } = globalThis.MT;
@@ -27,13 +28,19 @@ function freshMonthly() {
   return { m, a, b, c };
 }
 
-test('金額の入力を解釈できる', () => {
-  assert.deepEqual(U.parseYen('1,234,567'), { ok: true, value: 1234567 });
-  assert.deepEqual(U.parseYen('１２３４'), { ok: true, value: 1234 });
-  assert.deepEqual(U.parseYen('−5,000円'), { ok: true, value: -5000 });
-  assert.deepEqual(U.parseYen('▲300'), { ok: true, value: -300 });
-  assert.deepEqual(U.parseYen('-0'), { ok: true, value: 0 });
-  assert.deepEqual(U.parseYen('  '), { ok: true, value: null });
+test('金額の入力を解釈できる(式も可)', () => {
+  assert.deepEqual(U.parseYen('1000+500'), { ok: true, value: 1500, isExpression: true });
+  assert.equal(U.parseYen('1,980×3').value, 5940);
+  assert.equal(U.parseYen('(1000+200)*2').value, 2400);
+  assert.equal(U.parseYen('1980*1.1').value, 2178); // 小数は四捨五入
+  assert.equal(U.parseYen('10/0').ok, false);
+  assert.equal(U.parseYen('1000+').ok, false);
+  assert.equal(U.parseYen('1,234,567').value, 1234567);
+  assert.equal(U.parseYen('１２３４').value, 1234);
+  assert.equal(U.parseYen('−5,000円').value, -5000);
+  assert.equal(U.parseYen('▲300').value, -300);
+  assert.ok(Object.is(U.parseYen('-0').value, 0));
+  assert.equal(U.parseYen('  ').value, null);
   assert.equal(U.parseYen('12.5').ok, false);
   assert.equal(U.parseYen('abc').ok, false);
   assert.equal(U.parseYen('99999999999999').ok, false);

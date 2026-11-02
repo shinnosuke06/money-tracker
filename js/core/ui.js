@@ -25,6 +25,15 @@
     return el;
   }
 
+  /**
+   * 子要素を足す。null は飛ばし、配列は展開する。
+   * (ブラウザの el.append() は null を "null" という文字にしてしまうので、こちらを使う)
+   */
+  function add(el, ...children) {
+    append(el, children);
+    return el;
+  }
+
   function append(el, children) {
     for (const c of children) {
       if (c == null || c === false) continue;
@@ -51,6 +60,12 @@
     download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
     upload: '<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 19.5h14"/>',
     info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+    close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
+    check: '<path d="M5.5 12.5l4.2 4.2L18.5 8"/>',
+    bank: '<path d="M4 10h16M5.5 10v7M10 10v7M14 10v7M18.5 10v7M3.5 19.5h17M12 4l8 4H4z"/>',
+    wallet: '<rect x="3.5" y="6" width="17" height="13" rx="2.5"/><path d="M3.5 9.5h17M15.5 14h2"/>',
+    sync: '<path d="M5 12a7 7 0 0 1 12-4.9L19 9"/><path d="M19 4.5V9h-4.5"/><path d="M19 12a7 7 0 0 1-12 4.9L5 15"/><path d="M5 19.5V15h4.5"/>',
+    history: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9"/><path d="M4.5 4.5V9H9"/><path d="M12 8v4.5l3 2"/>',
     alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
   };
 
@@ -88,6 +103,107 @@
     el.addEventListener('pointerdown', (e) => {
       if (e.pointerType !== 'mouse') e.preventDefault();
     });
+  }
+
+  /**
+   * 金額の入力欄(式も可)。数字キーボードのまま「+ − ×」を入れられるボタン付き。
+   * 式のときは下に計算結果を出す。保存時に result() で整数にする。
+   * @param {{value?: number|null, size?: 'normal'|'large', label?: string, placeholder?: string, onChange?: Function}} opts
+   */
+  function amountField(opts = {}) {
+    const U = MT.util;
+    // compact: 計算ボタンは入力中だけ出す(内訳など、欄が多いところ用)
+    const input = h('input', {
+      class: `amount-input${opts.size === 'large' ? ' is-large' : ''}`,
+      type: 'text',
+      inputmode: 'numeric',
+      autocomplete: 'off',
+      enterkeyhint: 'done',
+      placeholder: opts.placeholder || '0',
+      'aria-label': opts.label || '金額(円)',
+    });
+    const calc = h('span', { class: 'amount-calc', 'aria-live': 'polite' });
+
+    function update() {
+      const r = U.parseYen(input.value);
+      calc.textContent = r.ok && r.isExpression && r.value !== null ? `= ${U.yen(r.value)}円` : '';
+      if (opts.onChange) opts.onChange(r);
+    }
+
+    /** 普通の数字を打っているときだけ 3 桁区切りにする(カーソルが末尾のとき) */
+    function reformat() {
+      const raw = input.value;
+      if (input.selectionStart !== raw.length) return;
+      if (!/^\s*[-−ー▲]?[\d０-９,，\s]+$/.test(raw)) return;
+      const r = U.parseYen(raw);
+      if (!r.ok || r.value === null || r.isExpression) return;
+      const neg = /^\s*[-−ー▲]/.test(raw);
+      const next = (neg ? '-' : '') + U.yen(Math.abs(r.value));
+      if (next !== raw) input.value = next;
+    }
+
+    function insert(text) {
+      const len = input.value.length;
+      const s = input.selectionStart == null ? len : input.selectionStart;
+      const e = input.selectionEnd == null ? s : input.selectionEnd;
+      input.value = input.value.slice(0, s) + text + input.value.slice(e);
+      const pos = s + text.length;
+      input.focus();
+      try {
+        input.setSelectionRange(pos, pos);
+      } catch (err) {
+        /* 何もしない */
+      }
+      update();
+    }
+
+    const opBtn = (text, insertText, aria) => {
+      const b = h('button', { type: 'button', class: 'op-btn', 'aria-label': aria, text });
+      keepFocusOnTap(b);
+      b.addEventListener('click', () => insert(insertText));
+      return b;
+    };
+
+    input.addEventListener('input', (e) => {
+      if (!e.isComposing) reformat();
+      update();
+    });
+
+    const el = h(
+      'div',
+      { class: `amount-field${opts.compact ? ' is-compact' : ''}` },
+      h('div', { class: 'amount-row' }, input, h('span', { class: 'amount-unit', text: '円' })),
+      h(
+        'div',
+        { class: 'amount-tools' },
+        opBtn('+', '+', '足し算'),
+        opBtn('−', '-', '引き算・マイナス'),
+        opBtn('×', '×', '掛け算'),
+        calc
+      )
+    );
+
+    const api = {
+      el,
+      input,
+      result: () => U.parseYen(input.value),
+      setValue(v) {
+        input.value = v == null ? '' : U.yenInput(v);
+        update();
+      },
+      focus(select = true) {
+        input.focus();
+        if (select) {
+          try {
+            input.setSelectionRange(0, input.value.length);
+          } catch (err) {
+            /* 何もしない */
+          }
+        }
+      },
+    };
+    if (opts.value != null) input.value = U.yenInput(opts.value);
+    return api;
   }
 
   // ---- シート(ダイアログ) ----
@@ -142,6 +258,10 @@
       closed = true;
       layer.remove();
       doc.removeEventListener('keydown', onKey);
+      if (vv) {
+        vv.removeEventListener('resize', fitViewport);
+        vv.removeEventListener('scroll', fitViewport);
+      }
       unlockScroll();
       if (prevFocus && prevFocus.focus && doc.contains(prevFocus) && prevFocus !== doc.body) {
         try {
@@ -151,6 +271,18 @@
         }
       }
       if (onClose) onClose(result);
+    }
+
+    // iPhone でキーボードが出たとき、見えている範囲にダイアログを収める
+    const vv = root.visualViewport;
+    function fitViewport() {
+      layer.style.top = `${vv.offsetTop}px`;
+      layer.style.height = `${vv.height}px`;
+    }
+    if (vv) {
+      vv.addEventListener('resize', fitViewport);
+      vv.addEventListener('scroll', fitViewport);
+      fitViewport();
     }
 
     backdrop.addEventListener('click', () => close());
@@ -174,7 +306,7 @@
   function confirmDialog({ title, message, okLabel = 'OK', cancelLabel = 'キャンセル', danger = false }) {
     return new Promise((resolve) => {
       const s = openSheet({ title, className: 'sheet-confirm', onClose: (r) => resolve(r === true) });
-      for (const p of [].concat(message || [])) s.body.append(h('p', { class: 'sheet-text', text: p }));
+      for (const p of [].concat(message || []).filter(Boolean)) s.body.append(h('p', { class: 'sheet-text', text: p }));
       s.foot.append(
         btn(cancelLabel, { onClick: () => s.close(false) }),
         btn(okLabel, { variant: danger ? 'danger' : 'primary', onClick: () => s.close(true) })
@@ -271,5 +403,5 @@
     }, duration);
   }
 
-  MT.ui = { h, icon, btn, keepFocusOnTap, openSheet, confirmDialog, promptDialog, actionSheet, toast };
+  MT.ui = { h, add, icon, btn, keepFocusOnTap, amountField, openSheet, confirmDialog, promptDialog, actionSheet, toast };
 })(window);

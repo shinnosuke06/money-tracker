@@ -44,6 +44,13 @@
     return makeYM(Math.floor(idx / 12), (idx % 12) + 1);
   }
 
+  /** a − b の月数(例:ymDiff('2026-12', '2026-10') = 2) */
+  function ymDiff(a, b) {
+    const x = splitYM(a);
+    const y = splitYM(b);
+    return (x.y - y.y) * 12 + (x.m - y.m);
+  }
+
   function lastDayOfYM(ym) {
     const { y, m } = splitYM(ym);
     const last = new Date(y, m, 0).getDate();
@@ -108,25 +115,122 @@
   }
 
   /**
-   * 金額入力の文字列を解釈する。
-   * 全角数字・カンマ・「円」「¥」・各種マイナス記号(− ー ▲ など)を受け付ける。
-   * @returns {{ok: true, value: number|null} | {ok: false, error: string}}
-   *          value が null のときは「空欄」
+   * 式を計算する(eval は使わない)。使える記号:+ - * / ( ) と小数点。
+   * @returns {number} 計算結果(小数のまま)
    */
-  function parseYen(raw) {
+  function evalExpression(src) {
+    let i = 0;
+    const fail = (msg) => {
+      throw new Error(msg || '式を計算できません');
+    };
+    const peek = () => src[i];
+    function number() {
+      const m = /^\d+(\.\d+)?/.exec(src.slice(i));
+      if (!m) fail();
+      i += m[0].length;
+      return Number(m[0]);
+    }
+    function factor(depth) {
+      if (depth > 20) fail();
+      const c = peek();
+      if (c === '+') {
+        i++;
+        return factor(depth + 1);
+      }
+      if (c === '-') {
+        i++;
+        return -factor(depth + 1);
+      }
+      if (c === '(') {
+        i++;
+        const v = expr(depth + 1);
+        if (peek() !== ')') fail('かっこが閉じていません');
+        i++;
+        return v;
+      }
+      return number();
+    }
+    function term(depth) {
+      let v = factor(depth);
+      while (peek() === '*' || peek() === '/') {
+        const op = src[i++];
+        const r = factor(depth);
+        if (op === '*') v *= r;
+        else {
+          if (r === 0) fail('0 で割ることはできません');
+          v /= r;
+        }
+      }
+      return v;
+    }
+    function expr(depth) {
+      let v = term(depth);
+      while (peek() === '+' || peek() === '-') {
+        const op = src[i++];
+        const r = term(depth);
+        v = op === '+' ? v + r : v - r;
+      }
+      return v;
+    }
+    const v = expr(0);
+    if (i !== src.length || !Number.isFinite(v)) fail();
+    return v;
+  }
+
+  /** 入力の表記ゆれ(全角・記号・カンマなど)をそろえる */
+  function normalizeAmountText(raw) {
     let s = String(raw == null ? '' : raw);
     s = s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
     s = s.replace(/[,，、\s円¥￥]/g, '');
-    s = s.replace(/^[−ー－‐▲△-]/, '-');
-    if (s === '') return { ok: true, value: null };
-    if (!/^-?\d+$/.test(s)) {
+    s = s.replace(/^[▲△]/, '-');
+    s = s
+      .replace(/[−ー－‐–—]/g, '-')
+      .replace(/[＋]/g, '+')
+      .replace(/[×xX＊]/g, '*')
+      .replace(/[÷／]/g, '/')
+      .replace(/[（]/g, '(')
+      .replace(/[）]/g, ')')
+      .replace(/[．]/g, '.');
+    return s;
+  }
+
+  /**
+   * 金額入力の文字列を解釈する。
+   * 全角数字・カンマ・「円」「¥」・マイナス記号(− ー ▲ など)を受け付ける。
+   * 「1000+500」「1980*3」のような式も可(結果は四捨五入して整数にする)。
+   * @returns {{ok: true, value: number|null, isExpression: boolean} | {ok: false, error: string}}
+   *          value が null のときは「空欄」
+   */
+  function parseYen(raw) {
+    const s = normalizeAmountText(raw);
+    if (s === '') return { ok: true, value: null, isExpression: false };
+    if (s.length > 200) return { ok: false, error: '式が長すぎます' };
+    let v;
+    let isExpression = false;
+    if (/^-?\d+$/.test(s)) {
+      v = Number(s);
+    } else if (/^-?\d+\.\d*$/.test(s)) {
       return { ok: false, error: '数字で入力してください(小数は使えません)' };
+    } else if (/^[\d+\-*/().]+$/.test(s)) {
+      isExpression = true;
+      try {
+        v = evalExpression(s);
+      } catch (e) {
+        return { ok: false, error: e.message || '式を計算できません' };
+      }
+      v = v < 0 ? -Math.round(-v) : Math.round(v);
+    } else {
+      return { ok: false, error: '数字か式(例:1000+500)で入力してください' };
     }
-    const v = Number(s);
     if (!Number.isSafeInteger(v) || Math.abs(v) > MAX_YEN) {
       return { ok: false, error: '金額が大きすぎます' };
     }
-    return { ok: true, value: v === 0 ? 0 : v }; // -0 を 0 にそろえる
+    return { ok: true, value: v === 0 ? 0 : v, isExpression }; // -0 を 0 にそろえる
+  }
+
+  /** 金額を 1,000 円などの単位で切り上げる */
+  function roundUp(n, unit) {
+    return n <= 0 ? 0 : Math.ceil(n / unit) * unit;
   }
 
   function isYenValue(v) {
@@ -175,6 +279,7 @@
     splitYM,
     makeYM,
     ymAdd,
+    ymDiff,
     lastDayOfYM,
     ymLabel,
     monthLabel,
@@ -185,6 +290,8 @@
     yenInput,
     percentSigned,
     parseYen,
+    evalExpression,
+    roundUp,
     isYenValue,
     MAX_YEN,
     uid,

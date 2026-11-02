@@ -6,26 +6,31 @@
  *
  * 各機能は defineSection() で自分の区画(monthly など)を登録する。
  * 登録内容:create()=空の初期値、normalize(raw)=読み込み時の点検・整形、
- *           hasContent(sec)=中身があるか、summarize(sec)=確認画面用の要約
+ *           hasContent(sec)=中身があるか、summarize(sec)=確認画面用の要約、
+ *           finalize(data)=区画をまたぐ参照の点検(保存のたびに呼ばれる。任意)
  *
- * データの形を変えるときは SCHEMA_VERSION を上げ、MIGRATIONS に変換を足す。
+ * データの形を変えるときは SCHEMA_VERSION を上げ、addMigration() で古い形からの変換を登録する。
+ *   v1 → v2:支払い管理(payments)を追加(js/features/payments/model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 1;
+  const SCHEMA_VERSION = 2;
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';
 
   /**
    * スキーマの移行。MIGRATIONS[n] はバージョン n のデータを受け取り、n+1 の形にして返す。
-   * 例(段階2で支払い管理を足すとき):
-   *   MIGRATIONS[1] = (d) => ({ ...d, schemaVersion: 2, payments: { cards: [], loans: [] } });
+   * 各機能のファイルから addMigration(n, fn) で登録する。
    */
   const MIGRATIONS = {};
+
+  function addMigration(fromVersion, fn) {
+    MIGRATIONS[fromVersion] = fn;
+  }
 
   const sections = {};
   const sectionOrder = [];
@@ -55,7 +60,15 @@
     for (const name of sectionOrder) {
       d[name] = isObject(raw[name]) ? sections[name].normalize(raw[name]) : sections[name].create();
     }
+    finalize(d);
     return d;
+  }
+
+  /** 区画をまたぐ参照(支払いの口座 → 月末記録の項目など)を点検する */
+  function finalize(d) {
+    for (const name of sectionOrder) {
+      if (sections[name].finalize) sections[name].finalize(d);
+    }
   }
 
   function fail(error) {
@@ -223,6 +236,7 @@
     }
     if (opts.backup) saveBackup(opts.backup);
     mutator(data);
+    finalize(data);
     const r = persist();
     notify();
     if (!r.ok) {
@@ -240,6 +254,7 @@
     }
     saveBackup(reason);
     data = newData;
+    finalize(data);
     const r = persist();
     notify();
     if (!r.ok) {
@@ -292,6 +307,7 @@
     SCHEMA_VERSION,
     STORAGE_KEY,
     defineSection,
+    addMigration,
     createEmpty,
     prepare,
     load,

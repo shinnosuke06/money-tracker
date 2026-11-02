@@ -4,6 +4,9 @@
  * 画面は MT.views に登録する。
  *   MT.views['monthly']      = { render(container, { entered }), unmount?(), needsAttention?() }
  *   MT.views['monthly/edit'] = { render(container), tab: 'monthly' }  // サブ画面
+ *
+ * 定期的な処理(支払いの月替わりなど)は MT.maintenance に関数を登録する。
+ *   起動時・画面に戻ったとき・データが変わったときに呼ばれ、お知らせの文を返すとトーストで表示する。
  */
 (function (root) {
   'use strict';
@@ -76,6 +79,34 @@
     }
   }
 
+  // ---- 定期的な処理 ----
+
+  let busy = false;
+
+  function runMaintenance() {
+    if (MT.store.isReadOnly()) return;
+    for (const task of MT.maintenance || []) {
+      try {
+        const msg = task();
+        if (msg) toast(msg, { duration: 4000 });
+      } catch (e) {
+        if (root.console) root.console.error(e);
+      }
+    }
+  }
+
+  /** データが変わったとき:定期処理を確認してから 1 回だけ描き直す */
+  function onStoreChange() {
+    if (busy) return;
+    busy = true;
+    try {
+      runMaintenance();
+    } finally {
+      busy = false;
+    }
+    render();
+  }
+
   function showGlobalNotice(title, text) {
     globalNotice = h(
       'section',
@@ -96,13 +127,23 @@
     }
 
     buildTabbar();
-    MT.store.subscribe(() => render());
+    busy = true;
+    try {
+      runMaintenance();
+    } finally {
+      busy = false;
+    }
+    MT.store.subscribe(onStoreChange);
+    // 開きっぱなしで日付や月が変わったとき用
+    root.document.addEventListener('visibilitychange', () => {
+      if (root.document.visibilityState === 'visible') onStoreChange();
+    });
     root.addEventListener('hashchange', () => render({ resetScroll: true }));
     // 別のタブで変更されたら読み直す
     root.addEventListener('storage', (e) => {
       if (e.key === MT.store.STORAGE_KEY) {
         MT.store.load();
-        render();
+        onStoreChange();
       }
     });
     // 画面のダーク/ライトが切り替わったらグラフの色を合わせる
