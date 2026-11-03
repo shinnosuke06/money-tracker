@@ -1,7 +1,10 @@
 /*
- * 旧・支払い管理アプリのバックアップ(JSON テキスト)を、新しい形に変換する
+ * 旧・支払い管理アプリのバックアップを、新しい形に変換する
  *
- * 旧形式のキー:accounts, wallets, incomes, payments, history, specialPayments, memos, allocations
+ * 読める形は 2 つ:
+ *  - JSON:キーは accounts, wallets, incomes, payments, history, specialPayments, memos, allocations
+ *  - テキスト形式:【手元現金】【口座】【入金】【支払い】【特別支出】【メモ】【履歴】の見出しと、カンマ区切りの行
+ *    (parseSections で JSON と同じ形に直してから変換する。行の形は parseSections の説明を参照)
  * 金額は "1000+500" のような式の文字列のことがある → 計算して整数にする
  * 口座(accounts / wallets)は、同じ名前の月末記録の項目があればつなぎ、無ければ項目を作る。
  * 変換できなかったものは issues に、変換のしかたを変えたものは notes に入れて報告する。
@@ -15,13 +18,161 @@
   const KEYS = ['accounts', 'wallets', 'incomes', 'payments', 'history', 'specialPayments', 'memos', 'allocations'];
   const CASH_CATEGORY = { id: 'cat_cash', name: '現金(銀行口座)' };
 
-  /** テキストを読み取る。値が JSON 文字列のまま入っている形(localStorage の書き出し)にも対応 */
+  // ---- テキスト形式 ----
+
+  const SECTION_RE = /^\s*【(手元現金|口座|入金|支払い|特別支出|メモ|履歴)】\s*$/;
+  const HISTORY_CATS = ['loan', 'fixed', 'variable', 'investment'];
+
+  /** 【口座】や【支払い】の見出しがある、テキスト形式のバックアップか */
+  function isSectionText(text) {
+    return /^\s*【(口座|支払い|入金)】\s*$/m.test(String(text == null ? '' : text));
+  }
+
+  /** base64 の JSON(UTF-8)を戻す。読めなければ null */
+  function decodeBase64Json(s) {
+    try {
+      const bin = root.atob(String(s).trim());
+      const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      return JSON.parse(new TextDecoder('utf-8').decode(bytes));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * テキスト形式のバックアップを、JSON の形(convert に渡せる形)に直す。
+   *   【手元現金】 id,名前,残高,(数値 3 つ),メモ
+   *   【口座】     id,名前,残高,(数値 2 つ),メモ
+   *   【入金】     id,名前,金額,毎月固定(0/1),済(0/1),メモ
+   *                メモが「◯◯に入金」で、◯◯が口座(手元現金)の名前なら、その口座を優先振込先にする
+   *   【支払い】   id,名前,請求額,引き落とし日,口座のid,カテゴリ,済(0/1),メモ,終了月(YYYY-MM)
+   *     >id,名前,金額,カテゴリ,終了月,メモ   … 先頭が「>」の行は、すぐ上の支払いの内訳
+   *   【特別支出】 id,名前,金額,支払月(YYYY-MM),済(0/1),メモ
+   *   【メモ】     メモの本文(何行でも)
+   *   【履歴】     年月,表示名,支払の合計,月末残高,ローン,固定費,変動費,投資,支払いの明細,収入の合計,入金の明細
+   *                明細は base64 の JSON(支払い:{ loan: [{ name, amount }], fixed: […], … }、入金:[{ name, amount }])
+   * 口座・手元現金の間の数値は意味が分からないので読まない(0 以外ならお知らせに出す)。
+   * 読めなかった行は _issues、読み方の説明は _notes に入れる(convert が報告に足す)。
+   */
+  function parseSections(text) {
+    const out = { wallets: [], accounts: [], incomes: [], payments: [], specialPayments: [], history: [], memos: '', _issues: [], _notes: [] };
+    const memoLines = [];
+    const flag = (v) => ['1', 'true'].includes(String(v == null ? '' : v).trim().toLowerCase());
+    const unknown = (label, nums, from) => {
+      const used = nums.map((v, k) => [from + k, String(v).trim()]).filter(([, v]) => v && v !== '0');
+      if (used.length) out._notes.push(`${label}:${used.map(([k, v]) => `${k}番目の値「${v}」`).join('・')}は、意味が分からないため読み込みませんでした`);
+    };
+    let section = null;
+    String(text == null ? '' : text)
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .forEach((raw, i) => {
+        const line = raw.trim();
+        const m = SECTION_RE.exec(line);
+        if (m) {
+          section = m[1];
+          return;
+        }
+        if (section === 'メモ') {
+          memoLines.push(raw.replace(/\s+$/, ''));
+          return;
+        }
+        if (!line || !section) return;
+        const where = `${i + 1}行目(【${section}】)`;
+        const f = line.split(',');
+        const rest = (k) => f.slice(k).join(',').trim();
+        if (section === '手元現金' || section === '口座') {
+          if (f.length < 3) return out._issues.push(`${where}:欄が足りないため、読み込みませんでした`);
+          const wallet = section === '手元現金';
+          const memoAt = wallet ? 6 : 5;
+          const item = { id: f[0].trim(), name: f[1].trim(), amount: f[2].trim(), memo: f.length > memoAt ? rest(memoAt) : '' };
+          unknown(`${section}「${item.name}」`, f.slice(3, memoAt), 4);
+          (wallet ? out.wallets : out.accounts).push(item);
+        } else if (section === '入金') {
+          if (f.length < 3) return out._issues.push(`${where}:欄が足りないため、読み込みませんでした`);
+          out.incomes.push({ id: f[0].trim(), name: f[1].trim(), amount: f[2].trim(), isFixed: flag(f[3]), isDone: flag(f[4]), memo: f.length > 5 ? rest(5) : '' });
+        } else if (section === '支払い') {
+          if (line.startsWith('>')) {
+            const g = line.slice(1).split(',');
+            const parent = out.payments[out.payments.length - 1];
+            if (!parent) return out._issues.push(`${where}:内訳の上に支払いが無いため、読み込みませんでした`);
+            parent.subItems.push({ id: g[0].trim(), name: (g[1] || '').trim(), amount: (g[2] || '').trim(), category: (g[3] || '').trim(), endDate: (g[4] || '').trim(), memo: g.slice(5).join(',').trim() });
+            return;
+          }
+          if (f.length < 6) return out._issues.push(`${where}:欄が足りないため、読み込みませんでした`);
+          const hasEnd = f.length >= 9;
+          out.payments.push({
+            id: f[0].trim(),
+            name: f[1].trim(),
+            amount: f[2].trim(),
+            dueDate: f[3].trim(),
+            accountId: f[4].trim(),
+            category: f[5].trim(),
+            isDone: flag(f[6]),
+            memo: (hasEnd ? f.slice(7, -1).join(',') : f[7] || '').trim(),
+            endDate: hasEnd ? f[f.length - 1].trim() : '',
+            subItems: [],
+          });
+        } else if (section === '特別支出') {
+          if (f.length < 4) return out._issues.push(`${where}:欄が足りないため、読み込みませんでした`);
+          out.specialPayments.push({ id: f[0].trim(), name: f[1].trim(), amount: f[2].trim(), targetMonth: f[3].trim(), isDone: flag(f[4]), memo: f.length > 5 ? rest(5) : '' });
+        } else if (section === '履歴') {
+          if (f.length < 8) return out._issues.push(`${where}:欄が足りないため、読み込みませんでした`);
+          const [month, , payment, balance, ...cats] = f.map((x) => x.trim());
+          const det = f[8] ? decodeBase64Json(f[8]) : null;
+          const inc = f[10] ? decodeBase64Json(f[10]) : null;
+          if (f[8] && !det) out._issues.push(`${where}:支払いの明細を読み取れなかったため、合計だけ読み込みました`);
+          if (f[10] && !inc) out._issues.push(`${where}:入金の明細を読み取れなかったため、合計だけ読み込みました`);
+          const details = [];
+          if (det && typeof det === 'object') {
+            for (const cat of [...HISTORY_CATS, 'special']) {
+              for (const x of Array.isArray(det[cat]) ? det[cat] : []) if (x && typeof x === 'object') details.push({ name: x.name, amount: x.amount, category: cat });
+            }
+          }
+          const catTotals = {};
+          HISTORY_CATS.forEach((c, k) => {
+            catTotals[c] = cats[k];
+          });
+          const sumCats = HISTORY_CATS.reduce((t, c) => t + (Number(catTotals[c]) || 0), 0);
+          if (Number(payment) !== sumCats) out._notes.push(`履歴「${month}」:支払の合計(${payment})と、カテゴリ別の合計の和(${sumCats})が合いません(元のデータのまま読み込みます)`);
+          out.history.push({
+            id: month,
+            payment,
+            balance,
+            catTotals,
+            details,
+            income: f[9] == null ? '' : f[9].trim(),
+            incomeDetails: Array.isArray(inc) ? inc.filter((x) => x && typeof x === 'object').map((x) => ({ name: x.name, amount: x.amount })) : [],
+          });
+        }
+      });
+    // メモ:前後の空行を落とす
+    while (memoLines.length && !memoLines[0].trim()) memoLines.shift();
+    while (memoLines.length && !memoLines[memoLines.length - 1].trim()) memoLines.pop();
+    out.memos = memoLines.join('\n');
+    // 入金のメモ「◯◯に入金」→ 優先振込先
+    const byName = new Map([...out.accounts, ...out.wallets].map((a) => [a.name, a.id]));
+    let targeted = 0;
+    for (const inc of out.incomes) {
+      const m = /^(.+?)に入金/.exec(inc.memo);
+      if (m && byName.has(m[1].trim())) {
+        inc.defaultTarget = byName.get(m[1].trim());
+        targeted++;
+      }
+    }
+    if (targeted) out._notes.push(`入金 ${targeted}件は、メモ「◯◯に入金」の口座を優先振込先にしました`);
+    out._notes.push('テキスト形式の読み方:入金の 2 つの 0/1 は「毎月固定」「済」、履歴の支払の合計の次の数は「月末残高」として読みました(違っていたら、読み込んだあとに直せます)');
+    return out;
+  }
+
+  /** テキストを読み取る。JSON(値が JSON 文字列のまま入っている形も)と、テキスト形式に対応 */
   function parse(text) {
     let obj;
     try {
       obj = JSON.parse(String(text || '').trim());
       if (typeof obj === 'string') obj = JSON.parse(obj);
     } catch (e) {
+      if (isSectionText(text)) return { ok: true, obj: parseSections(text) };
       return { ok: false, error: 'JSON として読み取れませんでした。バックアップの文字をすべてコピーしたか確認してください。' };
     }
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
@@ -343,6 +494,10 @@
       issues.push('振り分け(allocations):形を読み取れなかったため、自動の提案を使います');
     }
 
+    // テキスト形式の読み取りで見つかったこと
+    if (Array.isArray(obj._issues)) issues.push(...obj._issues.map(String));
+    if (Array.isArray(obj._notes)) notes.push(...obj._notes.map(String));
+
     data.payments = p;
     const counts = {
       linked: accountsReport.filter((x) => x.action === 'linked').length,
@@ -358,5 +513,5 @@
     return { data, report: { accounts: accountsReport, counts, issues, notes } };
   }
 
-  MT.paymentsLegacy = { parse, convert, KEYS };
+  MT.paymentsLegacy = { parse, convert, isSectionText, parseSections, KEYS };
 })(typeof window !== 'undefined' ? window : globalThis);

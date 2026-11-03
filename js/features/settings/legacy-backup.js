@@ -1,7 +1,8 @@
 /*
  * 旧アプリのバックアップのテキストを読む共通部品(画面には触らない)
- *  - 3 つの書き方に対応:「LZ:」で始まる圧縮(LZ-String の decompressFromBase64)、
- *    base64(atob + decodeURIComponent)、そのままの JSON(値が JSON の文字列になっている形も)
+ *  - 書き方:「LZ:」で始まる圧縮(LZ-String の decompressFromBase64)、
+ *    base64(atob + decodeURIComponent)、そのままの JSON(値が JSON の文字列になっている形も)、
+ *    旧・支払い管理アプリのテキスト形式(【口座】【支払い】…の見出しとカンマ区切りの行)
  *  - 中身から、どの旧アプリのバックアップかを見分ける。
  *    取り込みのボタンを間違えたときに、どのボタンで読めばよいかを案内するために使う
  */
@@ -43,6 +44,8 @@
       }
       if (!body) return { ok: false, error: '"LZ:" のデータを展開できませんでした。バックアップの文字をすべてコピーしたか確認してください。' };
     }
+    // 旧・支払い管理アプリのテキスト形式
+    if (MT.paymentsLegacy && MT.paymentsLegacy.isSectionText(body)) return { ok: true, obj: MT.paymentsLegacy.parseSections(body) };
     const tries = [
       () => JSON.parse(body),
       () => JSON.parse(decodeURIComponent(root.atob(body))),
