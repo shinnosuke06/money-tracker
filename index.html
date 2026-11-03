@@ -9,8 +9,8 @@
   <meta name="referrer" content="no-referrer">
   <!-- 長い数字が電話番号のリンクにならないように -->
   <meta name="format-detection" content="telephone=no">
-  <meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+  <!-- 色は js/core/theme-boot.js が表示テーマに合わせて書き換える -->
+  <meta name="theme-color" content="#f4f4f1">
   <!-- ホーム画面に追加したときの設定(iPhone) -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -19,6 +19,8 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <!-- 表示テーマは、色が付く前(スタイルシートより前)に決める -->
+  <script src="js/core/theme-boot.js"></script>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -29,6 +31,7 @@
 
   <!-- 共通 -->
   <script src="js/core/util.js"></script>
+  <script src="js/core/theme.js"></script>
   <script src="js/core/store.js"></script>
   <script src="js/core/ui.js"></script>
   <script src="js/core/libs.js"></script>

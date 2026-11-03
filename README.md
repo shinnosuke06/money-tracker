@@ -7,6 +7,7 @@
 - 金額はすべて **円の整数** で保存します。入力欄では `1000+500` や `1980*3` のような式も使えます(確定時に整数へ計算)
 - グラフは Chart.js、旧ポケカアプリの展開は lz-string を CDN(jsDelivr)から読み込みます(読み込めなくても他の機能は動きます)
 - 下部タブは「月末記録・支払い・資産・副業・その他」。在庫(ポケカ)・将来予想・設定は「その他」の中にあります
+- 表示テーマはライト(白基調)/ ダーク(黒基調)/ 端末に合わせる。設定の「表示テーマ」か、どの画面でも右上の丸いボタンで切り替えます
 - 株価の自動取得に使う URL と API キーは、設定画面で入力して端末内に保存します(コードには入れません)
 
 > このリポジトリには実際の金額・口座情報・個人名・実在の金融機関名や会社名・銘柄名・API キー・個人の URL を入れません。
@@ -47,7 +48,9 @@ icons/                     アプリのアイコン
 css/style.css              スタイル(色は :root の変数。ダークモード対応)
 js/
   core/
+    theme-boot.js          表示テーマを読み込みの最初に当てる(<head> で CSS より前に読む)
     util.js                日付・年月・金額・小数(式の計算を含む)の小さな関数
+    theme.js               表示テーマの切り替え(ライト / ダーク / 端末に合わせる)
     store.js               データの保存・読み込み・移行(schemaVersion)・バックアップ
     secrets.js             価格取得の URL・API キーの保存(データ本体とは別)
     ui.js                  ボタン・金額入力欄・ダイアログ・確認・通知などの画面部品
@@ -94,6 +97,7 @@ tests/
   assets.test.js           資産管理・価格取得(架空の返事)・旧データ変換のテスト
   inventory.test.js        ポケカ在庫・旧データ変換のテスト
   sidejob.test.js          副業収入・旧データ変換のテスト
+  theme.test.js            表示テーマと色のきまり(色の直書きがない・ダークの変数がそろっている・コントラスト)のテスト
 ```
 
 ### 機能の足し方(次の段階向け)
@@ -104,7 +108,36 @@ tests/
 4. 画面は `MT.views['<タブ名>'] = { render(container) }` で登録する(準備中の画面と置き換わる)
 5. 月替わりのような定期処理は `MT.maintenance` に関数を足す
 6. 入力フォームの部品は `MT.forms`、URL やキーのような秘密の設定は `MT.secrets` を使う
-7. `index.html` に script を追加する
+7. 色は下の「表示テーマと色のきまり」の CSS 変数だけを使う(直書きしない。`node --test` で確かめられる)
+8. `index.html` に script を追加する
+
+## 表示テーマと色のきまり
+
+テーマは **ライト / ダーク / 端末に合わせる(既定)** の 3 つ。選んだものは端末ごとの表示設定(localStorage の `moneyTracker:ui:theme`)に保存し、データの書き出しには含めません。
+
+- **最初に当てる**:`js/core/theme-boot.js` を `<head>` の中、スタイルシートより前に読み込み、`<html data-theme="light|dark">` と `theme-color` の meta を決める(起動時に一瞬だけ違う色が見えないように)。「端末に合わせる」の判定もここで行い、CSS 側では `prefers-color-scheme` を使わない
+- **切り替え**:`MT.theme.set('light' | 'dark' | 'system')`、右上のボタンは `MT.theme.toggle()`(いまの見た目の反対にする)。「端末に合わせる」のときは、iPhone の設定の変化に追従する
+- **描き直し**:テーマが変わると、画面を描き直し、`MT.charts.refreshAll()` で表示中のグラフ(ダイアログの中のものも)を新しい色で描き直す。グラフの色はすべて `MT.charts.palette()` で CSS 変数から読む
+- **スクショモード**:どちらのテーマでも、面(カード)の上にはっきりした文字で出し、右上のボタンも隠す
+
+### 色の変数(`css/style.css` の先頭)
+
+ライトの値は `:root`、ダークの値は `:root[data-theme="dark"]` に、同じ名前で書きます。**CSS にも JavaScript にも色を直書きしない**でください(例外は `theme-boot.js` / `theme.js` の theme-color だけ。`--bg` と同じ値にする)。
+
+| 用途 | 変数 |
+|---|---|
+| 背景・面 | `--bg`(画面)、`--surface`(カード・ダイアログ)、`--surface-2`(区切り・小さいボタン)、`--surface-3`(押したとき) |
+| 文字 | `--text`(本文)、`--text-2`(補足)、`--text-3`(注記・目盛り) |
+| 枠線 | `--line`、`--line-strong` |
+| 強調色 | `--accent`(ボタンの塗り)、`--accent-text`(文字・リンク)、`--accent-soft`(薄い塗り)、`--on-accent`(塗りの上の文字) |
+| 金額のプラス・マイナス | `--positive`(緑)・`--on-positive`、`--negative`(赤。エラーの文字にも使う)。色だけに頼らず `+` / `−` の符号も付ける |
+| 危険な操作 | `--danger`(削除ボタンの塗り)、`--on-danger`、`--danger-soft` |
+| 注意・お知らせ | `--warn`(点・帯。文字には使わない)、`--warn-text`(注意の文字・アイコン)、`--warn-soft`・`--warn-ink`、`--info-soft` |
+| 影・重なり | `--shadow`(カード)、`--shadow-raised`(ダイアログ)、`--shadow-pop`(浮かせた部品・通知)、`--shadow-chip`、`--backdrop` |
+| タブ・通知・吹き出し | `--tabbar-bg`、`--toast-bg`・`--toast-text`、`--toast-error-bg`・`--toast-error-text`、`--tooltip-bg`・`--tooltip-text` |
+| グラフ | `--series-1`〜`--series-8`(順番を変えない)、`--series-other`、`--chart-grid`(目盛り線)、`--chart-axis`(軸)、`--chart-text`(目盛り・凡例の文字) |
+
+新しい色が要るときは、両方のブロックに足し、文字は背景とのコントラストを **4.5 以上**にします。`tests/theme.test.js` が、色の直書きがないこと、ダークの変数がそろっていること、主な文字と背景のコントラストを確かめます。
 
 ## データ構造(schemaVersion 4)
 

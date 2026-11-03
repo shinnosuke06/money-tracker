@@ -108,6 +108,23 @@
     render();
   }
 
+  // ---- 表示テーマの切り替えボタン ----
+
+  function buildThemeToggle() {
+    const b = h('button', { type: 'button', id: 'theme-toggle', class: 'theme-toggle', onClick: () => MT.theme.toggle() });
+    root.document.body.append(b);
+    updateThemeToggle();
+  }
+
+  function updateThemeToggle() {
+    const b = root.document.getElementById('theme-toggle');
+    if (!b) return;
+    const dark = MT.theme.current() === 'dark';
+    b.replaceChildren(icon(dark ? 'moon' : 'sun'));
+    b.setAttribute('aria-label', `表示テーマ:${dark ? 'ダーク' : 'ライト'}(タップで${dark ? 'ライト' : 'ダーク'}に切り替え)`);
+    b.title = b.getAttribute('aria-label');
+  }
+
   function showGlobalNotice(title, text) {
     globalNotice = h(
       'section',
@@ -147,11 +164,13 @@
         onStoreChange();
       }
     });
-    // 画面のダーク/ライトが切り替わったらグラフの色を合わせる
-    if (root.matchMedia) {
-      const mq = root.matchMedia('(prefers-color-scheme: dark)');
-      if (mq.addEventListener) mq.addEventListener('change', () => render());
-    }
+    // 表示テーマ:どの画面からでも 1 タップで切り替えるボタン。変わったら画面とグラフを描き直す
+    buildThemeToggle();
+    MT.theme.onChange(() => {
+      updateThemeToggle();
+      render();
+      MT.charts.refreshAll(); // 開いているダイアログの中のグラフも
+    });
 
     render();
 

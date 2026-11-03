@@ -39,6 +39,8 @@
         h('h1', { class: 'page-title page-title-sub', text: '設定' })
       ),
 
+      themeCard(),
+
       h(
         'section',
         { class: 'card' },
@@ -152,6 +154,23 @@
       ),
 
       h('p', { class: 'app-version', text: 'マネートラッカー 段階4(ポケカ在庫・副業収入)' })
+    );
+  }
+
+  /** 表示テーマ(ライト / ダーク / 端末に合わせる)。端末ごとの設定で、データの書き出しには含めない */
+  function themeCard() {
+    const seg = MT.forms.segmented(
+      MT.theme.PREFS.map((p) => ({ value: p, label: MT.theme.LABELS[p] })),
+      MT.theme.pref(),
+      { label: '表示テーマ', onChange: (v) => MT.theme.set(v) }
+    );
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: '表示テーマ' }),
+      seg.el,
+      h('p', { class: 'hint', text: '「端末に合わせる」は、iPhone のライト/ダークの設定に合わせて自動で変わります。画面右上の丸いボタンでも、ライトとダークを 1 タップで切り替えられます。' }),
+      h('p', { class: 'hint', text: '選んだテーマはこの端末にだけ保存し、データの書き出しには含めません。' })
     );
   }
 

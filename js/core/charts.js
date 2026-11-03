@@ -1,7 +1,8 @@
 /*
  * グラフの共通部品(Chart.js)
- *  - 色は CSS 変数(--series-1〜8 など)から読むので、ダークモードにも追従する
+ *  - 色は CSS 変数(--series-1〜8・--chart-*・--tooltip-*)から読む(色の直書きはしない)
  *  - mount(slot, ...) で、場所(slot)ごとに 1 つのグラフを管理する(描き直すと古いものは破棄)
+ *  - テーマが変わったら refreshAll() で、表示中のグラフを新しい色で描き直す
  */
 (function (root) {
   'use strict';
@@ -26,6 +27,8 @@
       grid: cssVar('--chart-grid'),
       axis: cssVar('--chart-axis'),
       text: cssVar('--chart-text'),
+      tooltipBg: cssVar('--tooltip-bg'),
+      tooltipText: cssVar('--tooltip-text'),
       font: cssVar('--font'),
     };
   }
@@ -76,7 +79,10 @@
 
   function tooltip(c, callbacks, extra = {}) {
     return {
-      backgroundColor: 'rgba(20, 20, 19, 0.92)',
+      backgroundColor: c.tooltipBg,
+      titleColor: c.tooltipText,
+      bodyColor: c.tooltipText,
+      footerColor: c.tooltipText,
       titleFont: { family: c.font, weight: '600' },
       bodyFont: { family: c.font },
       footerFont: { family: c.font, weight: '600' },
@@ -149,6 +155,7 @@
    */
   function mount(slot, canvas, fallbackEl, buildConfig) {
     const s = destroy(slot);
+    Object.assign(s, { canvas, fallbackEl, buildConfig }); // テーマが変わったときの描き直し用
     const seq = s.seq;
     MT.libs
       .load('chart')
@@ -164,5 +171,12 @@
       });
   }
 
-  MT.charts = { MAX_SERIES, palette, foldSeries, monthLabels, legend, tooltip, scales, barStyle, topRadius, mount, destroy };
+  /** 表示中のグラフを、いまのテーマの色で描き直す */
+  function refreshAll() {
+    for (const [slot, s] of Object.entries(slots)) {
+      if (s.canvas && s.canvas.isConnected && s.buildConfig) mount(slot, s.canvas, s.fallbackEl, s.buildConfig);
+    }
+  }
+
+  MT.charts = { MAX_SERIES, palette, foldSeries, monthLabels, legend, tooltip, scales, barStyle, topRadius, mount, destroy, refreshAll };
 })(window);

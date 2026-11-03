@@ -1,41 +1,76 @@
 /* =========================================================
    マネートラッカー スタイル
-   色はすべて :root の変数で管理(ダークモードは下で上書き)
+
+   色のきまり(今後の段階も同じ)
+   - 色は下の「色の変数」だけを使う。CSS・JavaScript に色を直書きしない
+   - ライトの値は :root、ダークの値は :root[data-theme="dark"] に書く
+   - data-theme は js/core/theme-boot.js が読み込みの最初に必ず付ける
+     (「端末に合わせる」の判定もそこで行う。CSS 側で prefers-color-scheme は使わない)
+   - 新しい色が要るときは、同じ名前で両方のブロックに足し、文字は背景とのコントラスト 4.5 以上にする
    ========================================================= */
 
 :root {
   color-scheme: light;
   --font: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
     "Yu Gothic UI", Meiryo, system-ui, sans-serif;
+  --radius: 16px;
+  --tabbar-h: 56px;
 
-  --bg: #f4f4f1;
-  --surface: #fcfcfb;
-  --surface-2: #f0efec;
-  --surface-3: #e6e5df;
-  --text: #0b0b0b;
-  --text-2: #52514e;
-  --text-3: #6c6a65;
+  /* 背景・面 */
+  --bg: #f4f4f1; /* 画面の背景(theme-boot.js の theme-color と同じ値にする) */
+  --surface: #fcfcfb; /* カード・ダイアログ */
+  --surface-2: #f0efec; /* カードの中の区切り・小さいボタン */
+  --surface-3: #e6e5df; /* 押したとき */
+
+  /* 文字 */
+  --text: #0b0b0b; /* 本文 */
+  --text-2: #52514e; /* 補足 */
+  --text-3: #68665f; /* 注記・目盛り */
+
+  /* 枠線 */
   --line: #e1e0d9;
   --line-strong: #c3c2b7;
 
-  --accent: #256abf;
-  --accent-text: #1c5cab;
-  --accent-soft: #e5effb;
-  --on-accent: #ffffff;
-  --danger: #c43535;
+  /* 強調色(主なボタン・リンク・選択中) */
+  --accent: #256abf; /* ボタンの塗り */
+  --accent-text: #1c5cab; /* 文字・リンク */
+  --accent-soft: #e5effb; /* 薄い塗り */
+  --on-accent: #ffffff; /* 塗りの上の文字 */
+
+  /* 金額の色:プラスは緑、マイナスは赤(どちらも + / − の符号を必ず付ける) */
+  --positive: #006b00;
+  --on-positive: #ffffff;
+  --negative: #c23030; /* マイナス・エラーの文字 */
+
+  /* 削除などの危険な操作 */
+  --danger: #c23030; /* ボタンの塗り */
+  --on-danger: #ffffff;
   --danger-soft: #fbeaea;
-  --positive: #006300;
-  --warn: #fab219;
+
+  /* 注意・お知らせ */
+  --warn: #fab219; /* 点・帯(文字には使わない) */
+  --warn-text: #875500; /* 注意の文字・アイコン */
   --warn-soft: #fff4d9;
-  --warn-ink: #5c4000;
+  --warn-ink: #5c4000; /* warn-soft の上の文字 */
   --info-soft: #e8f0fa;
 
-  --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 2px 10px rgba(11, 11, 11, 0.05);
-  --radius: 16px;
-  --tabbar-h: 56px;
-  --tabbar-bg: rgba(252, 252, 251, 0.92);
+  /* 影・重なり */
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.04), 0 2px 10px rgba(11, 11, 11, 0.05); /* カード */
+  --shadow-raised: 0 12px 40px rgba(0, 0, 0, 0.28); /* ダイアログ */
+  --shadow-pop: 0 4px 16px rgba(0, 0, 0, 0.18); /* 浮かせた小さい部品・通知 */
+  --shadow-chip: 0 1px 3px rgba(11, 11, 11, 0.14); /* 切り替えボタンの選択中 */
+  --backdrop: rgba(0, 0, 0, 0.42); /* ダイアログの後ろ */
 
-  /* グラフの色(検証済みの並び順。順番を変えないこと) */
+  /* 下部タブ・通知・グラフの吹き出し */
+  --tabbar-bg: rgba(252, 252, 251, 0.92);
+  --toast-bg: #1d1d1b;
+  --toast-text: #ffffff;
+  --toast-error-bg: #b02a2a;
+  --toast-error-text: #ffffff;
+  --tooltip-bg: #1d1d1b;
+  --tooltip-text: #ffffff;
+
+  /* グラフ(系列の色は検証済みの並び順。順番を変えないこと) */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
@@ -45,70 +80,59 @@
   --series-7: #6250d6;
   --series-8: #e34948;
   --series-other: #a3a19a;
-  --chart-grid: #e1e0d9;
-  --chart-axis: #c3c2b7;
-  --chart-text: #6c6a65;
+  --chart-grid: #e1e0d9; /* 目盛り線 */
+  --chart-axis: #c3c2b7; /* 軸 */
+  --chart-text: #68665f; /* 目盛り・凡例の文字 */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-2: #242422;
-    --surface-3: #2e2e2b;
-    --text: #f0efec;
-    --text-2: #c3c2b7;
-    --text-3: #9d9b93;
-    --line: #2c2c2a;
-    --line-strong: #43433f;
-    --accent: #2f73c9;
-    --accent-text: #78afef;
-    --accent-soft: #16263b;
-    --danger: #ec7272;
-    --danger-soft: #3a1d1d;
-    --positive: #3cbf3c;
-    --warn-soft: #3a2f12;
-    --warn-ink: #f6d68a;
-    --info-soft: #172333;
-    --shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
-    --tabbar-bg: rgba(26, 26, 25, 0.92);
-    --series-1: #3987e5;
-    --series-2: #d95926;
-    --series-3: #199e70;
-    --series-4: #c98500;
-    --series-5: #d55181;
-    --series-6: #008300;
-    --series-7: #9085e9;
-    --series-8: #e66767;
-    --series-other: #6a6963;
-    --chart-grid: #2c2c2a;
-    --chart-axis: #383835;
-    --chart-text: #9d9b93;
-  }
-}
 :root[data-theme="dark"] {
   color-scheme: dark;
+
   --bg: #0d0d0d;
   --surface: #1a1a19;
   --surface-2: #242422;
   --surface-3: #2e2e2b;
+
   --text: #f0efec;
-  --text-2: #c3c2b7;
-  --text-3: #9d9b93;
+  --text-2: #c8c7bd;
+  --text-3: #a3a199;
+
   --line: #2c2c2a;
   --line-strong: #43433f;
-  --accent: #2f73c9;
-  --accent-text: #78afef;
+
+  --accent: #2a6bc0;
+  --accent-text: #7db3f1;
   --accent-soft: #16263b;
-  --danger: #ec7272;
+  --on-accent: #ffffff;
+
+  --positive: #4cc94c;
+  --on-positive: #0b0b0b;
+  --negative: #f48585;
+
+  --danger: #bf3434;
+  --on-danger: #ffffff;
   --danger-soft: #3a1d1d;
-  --positive: #3cbf3c;
+
+  --warn: #fab219;
+  --warn-text: #f2b744;
   --warn-soft: #3a2f12;
   --warn-ink: #f6d68a;
   --info-soft: #172333;
+
   --shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-raised: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 12px 40px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 6px 20px rgba(0, 0, 0, 0.5);
+  --shadow-chip: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --backdrop: rgba(0, 0, 0, 0.62);
+
   --tabbar-bg: rgba(26, 26, 25, 0.92);
+  --toast-bg: #e9e8e3;
+  --toast-text: #0b0b0b;
+  --toast-error-bg: #a82e2e;
+  --toast-error-text: #ffffff;
+  --tooltip-bg: #e9e8e3;
+  --tooltip-text: #0b0b0b;
+
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
@@ -120,7 +144,7 @@
   --series-other: #6a6963;
   --chart-grid: #2c2c2a;
   --chart-axis: #383835;
-  --chart-text: #9d9b93;
+  --chart-text: #a3a199;
 }
 
 /* ---------- 基本 ---------- */
@@ -291,7 +315,7 @@ button {
 }
 
 .card-danger .card-title {
-  color: var(--danger);
+  color: var(--negative);
 }
 
 .button-row {
@@ -346,7 +370,7 @@ button {
 }
 .btn-danger {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
 }
 .btn-ghost {
   background: transparent;
@@ -467,10 +491,10 @@ button {
   height: 22px;
 }
 .notice-warn .notice-icon {
-  color: #c98500;
+  color: var(--warn-text);
 }
 .notice-danger .notice-icon {
-  color: var(--danger);
+  color: var(--negative);
 }
 .notice-main {
   flex: 1;
@@ -526,7 +550,7 @@ button {
   font-weight: 600;
 }
 .delta.is-neg {
-  color: var(--danger);
+  color: var(--negative);
 }
 .delta.is-pos {
   color: var(--positive);
@@ -804,7 +828,7 @@ button {
 .seg button[aria-pressed="true"] {
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(11, 11, 11, 0.14);
+  box-shadow: var(--shadow-chip);
 }
 
 /* ---------- 項目と区分の編集 ---------- */
@@ -907,7 +931,7 @@ button {
 }
 .field-error {
   margin: 6px 0 0;
-  color: var(--danger);
+  color: var(--negative);
   font-size: 13px;
   font-weight: 600;
 }
@@ -1008,7 +1032,7 @@ button {
   padding: 4px;
   border-radius: 12px;
   background: var(--surface);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--line);
+  box-shadow: var(--shadow-pop), 0 0 0 1px var(--line);
 }
 .amount-field.is-compact .amount-calc {
   flex: none;
@@ -1081,7 +1105,7 @@ button {
 .sheet-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--backdrop);
   animation: fade-in 0.15s ease-out;
 }
 .sheet {
@@ -1096,7 +1120,7 @@ button {
   overscroll-behavior: contain;
   border-radius: 20px;
   background: var(--surface);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+  box-shadow: var(--shadow-raised);
   animation: sheet-in 0.18s ease-out;
 }
 .sheet-head {
@@ -1162,7 +1186,7 @@ button {
   background: var(--surface-3);
 }
 .action-item.is-danger {
-  color: var(--danger);
+  color: var(--negative);
   font-weight: 600;
 }
 
@@ -1204,15 +1228,16 @@ button {
   max-width: 100%;
   padding: 10px 16px;
   border-radius: 14px;
-  background: rgba(24, 24, 23, 0.94);
-  color: #fff;
+  background: var(--toast-bg);
+  color: var(--toast-text);
   font-size: 14px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-pop);
   animation: toast-in 0.2s ease-out;
   transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .toast-error {
-  background: #b02a2a;
+  background: var(--toast-error-bg);
+  color: var(--toast-error-text);
 }
 .toast.is-leaving {
   opacity: 0;
@@ -1279,7 +1304,7 @@ button {
    ========================================================= */
 
 .is-neg {
-  color: var(--danger) !important;
+  color: var(--negative) !important;
 }
 
 .page-sub {
@@ -1407,7 +1432,7 @@ button {
 .title-icon {
   margin-right: 6px;
   vertical-align: -3px;
-  color: #c98500;
+  color: var(--warn-text);
 }
 .warn-list {
   display: grid;
@@ -1636,7 +1661,7 @@ button {
 .check-btn.is-on .icon {
   background: var(--accent);
   box-shadow: none;
-  color: #fff;
+  color: var(--on-accent);
 }
 .pay-main {
   flex: 1;
@@ -1677,7 +1702,7 @@ button {
   font-weight: 700;
 }
 .meta-due.is-warn {
-  color: var(--danger);
+  color: var(--negative);
   font-weight: 700;
 }
 .meta-saving {
@@ -1698,7 +1723,7 @@ button {
   color: var(--text-3);
 }
 .pay-amount.is-missing {
-  color: #c98500;
+  color: var(--warn-text);
   font-size: 13px;
 }
 .pay-row.is-done .pay-name,
@@ -1725,7 +1750,7 @@ button {
   padding: 0 6px;
   border-radius: 999px;
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--negative);
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
@@ -1887,7 +1912,7 @@ details.ended > summary {
 .seg button[aria-checked="true"] {
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(11, 11, 11, 0.14);
+  box-shadow: var(--shadow-chip);
 }
 .hist-list {
   margin: 0;
@@ -2040,11 +2065,11 @@ details.ended > summary {
   padding: 8px 10px;
   border-radius: 10px;
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--negative);
   font-weight: 600;
 }
 .btn-ghost-danger {
-  color: var(--danger);
+  color: var(--negative);
   flex-grow: 0 !important;
 }
 
@@ -2087,7 +2112,7 @@ details.ended > summary {
   overflow-wrap: anywhere;
 }
 .report-list.is-issue {
-  color: var(--danger);
+  color: var(--negative);
 }
 .paste-area {
   min-height: 140px;
@@ -2321,7 +2346,7 @@ details.ended > summary {
 }
 .paste-rows li.is-error {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--negative);
 }
 .paste-rows em {
   margin-left: 4px;
@@ -2466,7 +2491,7 @@ details.ended > summary {
   white-space: nowrap;
 }
 .is-warn-text {
-  color: var(--danger) !important;
+  color: var(--negative) !important;
   font-weight: 600;
 }
 
@@ -2591,7 +2616,7 @@ details.ended > summary {
 .round-check.is-on .icon {
   background: var(--positive);
   box-shadow: none;
-  color: #fff;
+  color: var(--on-positive);
 }
 .job-row .pay-main {
   padding-right: 4px;
@@ -2781,4 +2806,65 @@ html.is-shot .view {
   display: flex;
   justify-content: center;
   margin: 2px 0 4px;
+}
+
+/* =========================================================
+   表示テーマの切り替えボタン(どの画面でも右上)
+   ========================================================= */
+
+.theme-toggle {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 13px);
+  right: max(12px, env(safe-area-inset-right), calc(50% - 380px + 12px));
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow), 0 0 0 1px var(--line);
+  color: var(--text-2);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.theme-toggle:active {
+  background: var(--surface-3);
+}
+.theme-toggle .icon {
+  width: 22px;
+  height: 22px;
+}
+/* 見出しの右側をボタンの分だけ空ける */
+.page-head {
+  padding-right: 48px;
+}
+/* スクショモードではボタンも隠す */
+html.is-shot .theme-toggle {
+  display: none !important;
+}
+
+/* スクショモードは、どちらのテーマでもカードの上に、くっきりした文字で出す */
+.shot {
+  padding: 18px 16px 12px;
+  margin-top: 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow), 0 0 0 1px var(--line);
+}
+.shot-title,
+.shot-total strong,
+.shot-amount,
+.shot-date {
+  color: var(--text);
+}
+.shot-client,
+.shot-content {
+  color: var(--text-2);
+}
+.shot-table td {
+  border-bottom-color: var(--line-strong);
 }
