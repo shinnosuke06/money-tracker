@@ -419,61 +419,122 @@
     }
   }
 
-  // ---- 旧・支払い管理アプリの取り込み ----
+  // ---- 旧アプリの取り込み(共通) ----
+  // どのボタンからでも「LZ:」・base64・JSON を読み、別のアプリのバックアップなら、読むべきボタンを案内する
 
-  function legacyImportFlow() {
-    const s = openSheet({
-      title: '旧アプリのバックアップを読み込む',
-      description: 'バックアップの JSON テキストを貼り付けるか、ファイルを選んでください。',
-      className: 'sheet-form',
-    });
-    const ta = h('textarea', {
-      class: 'field-textarea paste-area',
-      rows: 6,
-      placeholder: '{"accounts":[…],"payments":[…], …}',
-      'aria-label': 'バックアップのテキスト',
-      autocomplete: 'off',
-      autocapitalize: 'off',
-      spellcheck: 'false',
-    });
+  const LB = () => MT.legacyBackup;
+
+  /** 「LZ:」で始まるときだけ LZ-String を読み込む(読み込めなければ null) */
+  async function lzFor(text) {
+    if (!LB().needsLz(text)) return null;
+    try {
+      return await MT.libs.load('lzstring');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * バックアップのテキストを戻し、expected(payments / assets / sidejob / inventory)のものか確かめる。
+   * @returns {Promise<{ok: true, obj} | {ok: false, message: string, kind?: string}>}
+   */
+  async function readLegacyBackup(text, expected) {
+    const u = LB().unwrap(text, await lzFor(text));
+    if (!u.ok) return { ok: false, message: u.error };
+    const kind = LB().identify(u.obj);
+    if (kind && kind !== expected) return { ok: false, message: LB().wrongKindMessage(kind, expected), kind };
+    return { ok: true, obj: u.obj };
+  }
+
+  /** 別の取り込みを開く(貼り付けた文字を引き継ぐ) */
+  function openLegacy(kind, text) {
+    const open = { payments: legacyImportFlow, assets: assetsLegacyFlow, sidejob: sidejobLegacyFlow, inventory: inventoryLegacyFlow }[kind];
+    if (open) open(text);
+  }
+
+  /**
+   * バックアップを貼り付ける(またはファイルを選ぶ)ダイアログ。
+   * onNext(text) が null を返したら閉じる。文字列か { message, kind } を返したら案内を出し、
+   * kind があれば、そのバックアップ用の取り込みへ移るボタンも出す。
+   */
+  function pasteSheet({ title, placeholder, initial, onNext }) {
+    const s = openSheet({ title, description: 'バックアップのテキストを貼り付けるか、ファイルを選んでください(「LZ:」で始まる形も読めます)。', className: 'sheet-form' });
+    const ta = h('textarea', { class: 'field-textarea paste-area', rows: 6, placeholder, 'aria-label': 'バックアップのテキスト', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+    ta.value = typeof initial === 'string' ? initial : ''; // ボタンから開いたときは、クリックの情報が入ってくるので使わない
     const file = h('input', { type: 'file', accept: 'application/json,.json,.txt,text/plain', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true' });
-    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+    const errBox = h('div', { role: 'alert' });
     file.addEventListener('change', async () => {
       const f = file.files && file.files[0];
       file.value = '';
       if (f) ta.value = await f.text();
     });
+    function showError(res) {
+      const message = typeof res === 'string' ? res : res.message;
+      const kind = typeof res === 'object' && res.kind && res.kind !== 'app' ? res.kind : null;
+      errBox.replaceChildren();
+      add(
+        errBox,
+        h('p', { class: 'field-error', text: message }),
+        kind
+          ? h(
+              'div',
+              { class: 'button-row' },
+              btn(`${LB().KINDS[kind].label}の取り込みで読む`, {
+                variant: 'primary',
+                size: 'small',
+                onClick: () => {
+                  const text = ta.value;
+                  s.close();
+                  openLegacy(kind, text);
+                },
+              })
+            )
+          : null
+      );
+    }
     s.body.append(
       ta,
       h('div', { class: 'button-row' }, btn('ファイルを選ぶ', { icon: 'upload', size: 'small', onClick: () => file.click() })),
       file,
-      err,
-      h('p', { class: 'form-hint', text: '次の画面で変換結果を確認してから読み込みます。データはこの端末の中だけで変換され、どこにも送信されません。' })
+      errBox,
+      h('p', { class: 'form-hint', text: '次の画面で内容を確認してから読み込みます。データはこの端末の中だけで変換され、どこにも送信されません。' })
     );
-    s.foot.append(
-      btn('キャンセル', { onClick: () => s.close() }),
-      btn('変換して確認', {
-        variant: 'primary',
-        onClick: () => {
-          const r = MT.paymentsLegacy.parse(ta.value);
-          if (!r.ok) {
-            err.textContent = r.error;
-            err.hidden = false;
-            return;
-          }
-          let res;
-          try {
-            res = MT.paymentsLegacy.convert(r.obj, store.get());
-          } catch (e) {
-            err.textContent = '変換中に問題が起きました。バックアップの中身を確認してください。';
-            err.hidden = false;
-            return;
-          }
-          s.close();
-          showLegacyReport(res);
-        },
-      })
-    );
+    const next = btn('確認へ', { variant: 'primary' });
+    next.addEventListener('click', async () => {
+      next.disabled = true;
+      try {
+        const res = await onNext(ta.value);
+        if (res) showError(res);
+        else s.close();
+      } finally {
+        next.disabled = false;
+      }
+    });
+    s.foot.append(btn('キャンセル', { onClick: () => s.close() }), next);
+  }
+
+  // ---- 旧・支払い管理アプリの取り込み ----
+
+  function legacyImportFlow(initial) {
+    pasteSheet({
+      title: '旧・支払い管理アプリのバックアップ',
+      placeholder: '{"accounts":[…],"payments":[…], …}',
+      initial,
+      onNext: async (textValue) => {
+        const b = await readLegacyBackup(textValue, 'payments');
+        if (!b.ok) return b;
+        const r = MT.paymentsLegacy.parse(JSON.stringify(b.obj));
+        if (!r.ok) return r.error;
+        let res;
+        try {
+          res = MT.paymentsLegacy.convert(r.obj, store.get());
+        } catch (e) {
+          return '変換中に問題が起きました。バックアップの中身を確認してください。';
+        }
+        showLegacyReport(res);
+        return null;
+      },
+    });
   }
 
   function showLegacyReport(res) {
@@ -520,51 +581,20 @@
 
   // ---- 旧・資産管理アプリの取り込み ----
 
-  function assetsLegacyFlow() {
-    const s = openSheet({
+  function assetsLegacyFlow(initial) {
+    pasteSheet({
       title: '旧・資産管理アプリのバックアップ',
-      description: 'バックアップの JSON テキストを貼り付けるか、ファイルを選んでください。',
-      className: 'sheet-form',
-    });
-    const ta = h('textarea', {
-      class: 'field-textarea paste-area',
-      rows: 6,
       placeholder: '{"holdings":[…],"history":[…],"prices":{…},"lastTotal":…}',
-      'aria-label': 'バックアップのテキスト',
-      autocomplete: 'off',
-      autocapitalize: 'off',
-      spellcheck: 'false',
+      initial,
+      onNext: async (textValue) => {
+        const b = await readLegacyBackup(textValue, 'assets');
+        if (!b.ok) return b;
+        const r = MT.assetsLegacy.parse(JSON.stringify(b.obj));
+        if (!r.ok) return r.error;
+        assetsLegacyConfirm(r.obj);
+        return null;
+      },
     });
-    const file = h('input', { type: 'file', accept: 'application/json,.json,.txt,text/plain', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true' });
-    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
-    file.addEventListener('change', async () => {
-      const f = file.files && file.files[0];
-      file.value = '';
-      if (f) ta.value = await f.text();
-    });
-    s.body.append(
-      ta,
-      h('div', { class: 'button-row' }, btn('ファイルを選ぶ', { icon: 'upload', size: 'small', onClick: () => file.click() })),
-      file,
-      err,
-      h('p', { class: 'form-hint', text: '次の画面で内容を確認してから読み込みます。データはこの端末の中だけで変換されます。' })
-    );
-    s.foot.append(
-      btn('キャンセル', { onClick: () => s.close() }),
-      btn('確認へ', {
-        variant: 'primary',
-        onClick: () => {
-          const r = MT.assetsLegacy.parse(ta.value);
-          if (!r.ok) {
-            err.textContent = r.error;
-            err.hidden = false;
-            return;
-          }
-          s.close();
-          assetsLegacyConfirm(r.obj);
-        },
-      })
-    );
   }
 
   /** 読み込む前の確認:はっきりしない点を選び、変換結果を見てから読み込む */
@@ -658,40 +688,6 @@
 
   // ---- 旧・副業管理アプリ / 旧・ポケカ管理アプリ ----
 
-  /** バックアップを貼り付ける(またはファイルを選ぶ)ダイアログ。onNext(text) が false 以外を返したら閉じる */
-  function pasteSheet({ title, placeholder, onNext }) {
-    const s = openSheet({ title, description: 'バックアップのテキストを貼り付けるか、ファイルを選んでください。', className: 'sheet-form' });
-    const ta = h('textarea', { class: 'field-textarea paste-area', rows: 6, placeholder, 'aria-label': 'バックアップのテキスト', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
-    const file = h('input', { type: 'file', accept: 'application/json,.json,.txt,text/plain', class: 'visually-hidden', tabindex: '-1', 'aria-hidden': 'true' });
-    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
-    file.addEventListener('change', async () => {
-      const f = file.files && file.files[0];
-      file.value = '';
-      if (f) ta.value = await f.text();
-    });
-    s.body.append(
-      ta,
-      h('div', { class: 'button-row' }, btn('ファイルを選ぶ', { icon: 'upload', size: 'small', onClick: () => file.click() })),
-      file,
-      err,
-      h('p', { class: 'form-hint', text: '次の画面で内容を確認してから読み込みます。データはこの端末の中だけで変換されます。' })
-    );
-    const next = btn('確認へ', { variant: 'primary' });
-    next.addEventListener('click', async () => {
-      next.disabled = true;
-      try {
-        const msg = await onNext(ta.value);
-        if (msg) {
-          err.textContent = msg;
-          err.hidden = false;
-        } else s.close();
-      } finally {
-        next.disabled = false;
-      }
-    });
-    s.foot.append(btn('キャンセル', { onClick: () => s.close() }), next);
-  }
-
   /** 変換結果の確認と読み込み */
   function legacyConfirm({ title, lines, report, replaceText, reason, navigateTo, data }) {
     const s = openSheet({ title, className: 'sheet-form' });
@@ -721,13 +717,16 @@
 
   const FORMAT_LABEL = { settingsFirst: '[設定, 記録] の形', recordsFirst: '[記録, 設定] の形', object: '{ jobs, settings } の形' };
 
-  function sidejobLegacyFlow() {
+  function sidejobLegacyFlow(initial) {
     pasteSheet({
       title: '旧・副業管理アプリのバックアップ',
       placeholder: '[["依頼元A",1.2,"…","依頼元B",0.8,"…"],[[261102,0,1.2,1,1], …]] など',
-      onNext: (textValue) => {
+      initial,
+      onNext: async (textValue) => {
+        const b = await readLegacyBackup(textValue, 'sidejob');
+        if (!b.ok) return b;
         const L = MT.sidejobLegacy;
-        const p = L.parse(textValue);
+        const p = L.parse(JSON.stringify(b.obj));
         if (!p.ok) return p.error;
         let res;
         try {
@@ -750,25 +749,21 @@
     });
   }
 
-  function inventoryLegacyFlow() {
+  function inventoryLegacyFlow(initial) {
     pasteSheet({
       title: '旧・ポケカ管理アプリのバックアップ',
       placeholder: 'LZ:… または 英数字の長いテキスト',
+      initial,
       onNext: async (textValue) => {
-        const L = MT.inventoryLegacy;
-        let lz = null;
-        if (L.needsLz(textValue)) {
-          try {
-            lz = await MT.libs.load('lzstring');
-          } catch (e) {
-            lz = null;
-          }
+        const b = await readLegacyBackup(textValue, 'inventory');
+        if (!b.ok) return b;
+        const obj = b.obj;
+        if (!obj || typeof obj !== 'object' || Array.isArray(obj) || !obj.inventory || typeof obj.inventory !== 'object' || Array.isArray(obj.inventory)) {
+          return '在庫(inventory)が見つかりませんでした。旧・ポケカ管理アプリのバックアップか確認してください。';
         }
-        const dec = L.decode(textValue, lz);
-        if (!dec.ok) return dec.error;
         let res;
         try {
-          res = L.convert(dec.obj, store.get());
+          res = MT.inventoryLegacy.convert(obj, store.get());
         } catch (e) {
           return '変換中に問題が起きました。バックアップの中身を確認してください。';
         }
