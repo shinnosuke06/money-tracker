@@ -133,7 +133,8 @@
           infoRow('内容', store.summarize(d).join(' / ')),
           infoRow('最終保存', formatDateTime(d.meta.updatedAt)),
           infoRow('サイズ', formatBytes(store.storedBytes())),
-          infoRow('データ形式', `schemaVersion ${d.schemaVersion}`)
+          infoRow('データ形式', `schemaVersion ${d.schemaVersion}`),
+          infoRow('アプリの版', store.APP_VERSION)
         ),
         h(
           'div',

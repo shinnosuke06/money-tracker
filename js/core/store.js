@@ -22,6 +22,8 @@
 
   const APP_ID = 'money-tracker';
   const SCHEMA_VERSION = 6;
+  // 画面に出す、アプリの版(更新が届いているかを見分けるため)。変更を出すたびに上げる
+  const APP_VERSION = '2026.11.03-2';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';
@@ -311,6 +313,7 @@
   MT.store = {
     APP_ID,
     SCHEMA_VERSION,
+    APP_VERSION,
     STORAGE_KEY,
     defineSection,
     addMigration,
