@@ -14,7 +14,7 @@
   const store = MT.store;
   const C = MT.charts;
   const F = MT.sidejobUI;
-  const { h, add, icon, btn, toast } = MT.ui;
+  const { h, add, icon, btn, toast, actionSheet } = MT.ui;
 
   const SUBNAV = [
     { path: 'sidejob', label: '記録' },
@@ -238,32 +238,24 @@
     );
   }
 
-  function renderPlan(container) {
-    const data = sj();
-    head(container, 'sidejob/plan');
-    if (!data.clients.length) return noClients(container);
-    const cur = U.currentYM();
-    container.append(
-      h(
-        'section',
-        { class: 'card' },
-        h('h2', { class: 'card-title', text: '予想額' }),
-        h('div', { class: 'cal-switch' }, clientFilter(data)),
-        h('div', { class: 'stat-grid' }, forecastCard(data, cur, '今月'), forecastCard(data, U.ymAdd(cur, 1), '来月')),
-        h('p', { class: 'hint', text: '予定 = 入金がまだ確認できていない記録 + 今日以降の予定日(基本額 + 既定の作業項目。追加で出る日は、選んだ基本額と作業項目)。予定は薄い色で表示しています。' })
-      )
-    );
+  // ---- 予定のカレンダー ----
 
-    // カレンダー
-    const cid = state.client || data.clients[0].id;
+  /** 月のカレンダーの枠(曜日の見出しと、1 日の前の空き) */
+  function calendarFrame(ym, cells, label) {
+    const first = U.weekday(`${ym}-01`);
+    const blanks = Array.from({ length: first }, () => h('span', { class: 'cal-cell is-blank', 'aria-hidden': 'true' }));
+    return h('div', { class: 'cal-grid', role: 'group', 'aria-label': label }, U.WEEKDAYS.map((w) => h('span', { class: 'cal-wd', text: w })), blanks, cells);
+  }
+
+  /** 依頼元を 1 つに絞り込んだときのカレンダー(予定 ↔ 休む、予定のない日は追加で出る日を入れる) */
+  function clientCalendar(data) {
+    const cid = state.client;
     const client = S.findClient(data, cid);
     const ym = state.month;
     const recorded = new Set(data.records.filter((r) => r.clientId === cid && r.date.startsWith(ym)).map((r) => r.date));
-    const first = U.weekday(`${ym}-01`);
     const n = U.daysInMonth(ym);
     const today = U.todayStr();
     const cells = [];
-    for (let i = 0; i < first; i++) cells.push(h('span', { class: 'cal-cell is-blank', 'aria-hidden': 'true' }));
     for (let d = 1; d <= n; d++) {
       const date = `${ym}-${String(d).padStart(2, '0')}`;
       const st = S.dayState(data, ym, client, date);
@@ -287,15 +279,13 @@
       );
     }
     const planned = S.plannedDates(data, ym, client);
-    container.append(
-      h(
+    return h(
         'section',
         { class: 'card' },
         h('h2', { class: 'card-title', text: `${client.name}の予定` }),
         h('div', { class: 'cal-switch' }, monthSwitcher()),
-        state.client ? null : h('p', { class: 'hint', text: '依頼元を絞り込むと、その依頼元の予定を直せます(いまは 1 件目を表示)。' }),
         h('p', { class: 'hint', text: `曜日パターン:${client.weekdays.length ? client.weekdays.map((w) => U.WEEKDAYS[w]).join('・') : '未設定'}・予定 ${planned.length}日` }),
-        h('div', { class: 'cal-grid', role: 'group', 'aria-label': `${U.ymLabel(ym)}の予定` }, U.WEEKDAYS.map((w) => h('span', { class: 'cal-wd', text: w })), cells),
+        calendarFrame(ym, cells, `${U.ymLabel(ym)}の予定`),
         h(
           'p',
           { class: 'cal-legend' },
@@ -305,7 +295,98 @@
           h('span', { text: '● 記録あり' })
         ),
         h('p', { class: 'hint', text: '予定の日をタップすると「休む」になります。予定のない日をタップすると、依頼元と基本額・作業項目を選んで「追加で出る」日にできます(もう一度タップで直す・やめる)。' })
+      );
+  }
+
+  const STATE_LABEL = { planned: '予定', off: '休む', extra: '追加で出る', none: '予定なし' };
+
+  /** 「全体」のときのカレンダー:全部の依頼元の予定・休む日・追加で出る日を、依頼元ごとの色で出す */
+  function allCalendar(data) {
+    const ym = state.month;
+    const today = U.todayStr();
+    const clients = data.clients;
+    const recorded = new Set(data.records.filter((r) => r.date.startsWith(ym)).map((r) => r.date));
+    const cells = [];
+    for (let d = 1; d <= U.daysInMonth(ym); d++) {
+      const date = `${ym}-${String(d).padStart(2, '0')}`;
+      const marks = clients
+        .map((c, i) => ({ c, i, st: S.dayState(data, ym, c, date), plan: S.dayPlan(data, c.id, date) }))
+        .filter((x) => x.st !== 'none');
+      const done = recorded.has(date);
+      const label = marks.length
+        ? marks.map((x) => `${x.c.name}:${STATE_LABEL[x.st]}${x.plan && x.st !== 'off' ? `(見込み ${U.man(S.recordTotal(x.plan))})` : ''}`).join('、')
+        : '予定なし';
+      cells.push(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `cal-cell is-multi${marks.some((x) => x.st !== 'off') ? ' has-plan' : ''}${date === today ? ' is-today' : ''}`,
+            'aria-label': `${U.dayLabel(date)} ${label}${done ? '・記録あり' : ''}`,
+            onClick: () => dayMenu(data, date),
+          },
+          h('span', { class: 'cal-day', text: String(d) }),
+          h('span', { class: 'cal-dots', 'aria-hidden': 'true' }, marks.map((x) => h('span', { class: `cal-dot cli-${x.i + 1} is-${x.st}` }))),
+          done ? h('span', { class: 'cal-mark', text: '●' }) : null
+        )
+      );
+    }
+    const counts = clients.map((c) => `${c.name} ${S.plannedDates(data, ym, c).length}日`).join('・');
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: '全体の予定' }),
+      h('div', { class: 'cal-switch' }, monthSwitcher()),
+      h('p', { class: 'hint', text: `予定:${counts}` }),
+      calendarFrame(ym, cells, `${U.ymLabel(ym)}の全体の予定`),
+      h(
+        'p',
+        { class: 'cal-legend' },
+        clients.map((c, i) => h('span', { class: `lg-cli cli-${i + 1}`, text: c.name })),
+        h('span', { class: 'lg-shape', text: '● 予定 ■ 追加で出る ○ 休む' }),
+        h('span', { text: '右上の ● 記録あり' })
       ),
+      h('p', { class: 'hint', text: '日をタップすると、依頼元ごとに「休む」「予定に戻す」「追加で出る日を入れる・直す」を選べます。' })
+    );
+  }
+
+  /** 「全体」のカレンダーで日をタップしたとき:依頼元ごとの操作を選ぶ */
+  function dayMenu(data, date) {
+    const ym = state.month;
+    const actions = [];
+    for (const c of data.clients) {
+      const st = S.dayState(data, ym, c, date);
+      const toggle = () => store.update((dd) => S.toggleDay(dd.sidejob, ym, c.id, date));
+      if (st === 'planned') {
+        actions.push({ label: `${c.name}:休む日にする`, onSelect: toggle });
+        actions.push({ label: `${c.name}:この日の見込みを直す`, onSelect: () => F.openExtraDaySheet(date, c.id) });
+      } else if (st === 'off') actions.push({ label: `${c.name}:予定に戻す`, onSelect: toggle });
+      else if (st === 'extra') actions.push({ label: `${c.name}:追加で出る日を直す・やめる`, onSelect: () => F.openExtraDaySheet(date, c.id) });
+    }
+    const free = data.clients.find((c) => S.dayState(data, ym, c, date) === 'none') || data.clients[0];
+    actions.push({ label: '追加で出る日を入れる(依頼元を選ぶ)', onSelect: () => F.openExtraDaySheet(date, free.id) });
+    actionSheet({ title: U.dayLabel(date), description: '依頼元ごとの予定を変えます。', actions });
+  }
+
+  function renderPlan(container) {
+    const data = sj();
+    head(container, 'sidejob/plan');
+    if (!data.clients.length) return noClients(container);
+    const cur = U.currentYM();
+    container.append(
+      h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card-title', text: '予想額' }),
+        h('div', { class: 'cal-switch' }, clientFilter(data)),
+        h('div', { class: 'stat-grid' }, forecastCard(data, cur, '今月'), forecastCard(data, U.ymAdd(cur, 1), '来月')),
+        h('p', { class: 'hint', text: '予定 = 入金がまだ確認できていない記録 + 今日以降の予定日(基本額 + 既定の作業項目)+ 追加で出る日(選んだ基本額と作業項目。今日より前の日も、記録を作るまでは数えます)。予定は薄い色で表示しています。' })
+      )
+    );
+
+    // カレンダー:「全体」のときは全部の依頼元を色分けして 1 つに、絞り込んだときはその依頼元だけ
+    container.append(
+      state.client ? clientCalendar(data) : allCalendar(data),
       h(
         'section',
         { class: 'card' },

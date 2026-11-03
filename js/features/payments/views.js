@@ -117,6 +117,8 @@
 
     const cf = P.cashflow(p, ym);
     container.append(cashflowCard(cf));
+    const next = sidejobNextCard(d, { compact: true });
+    if (next) container.append(next);
     const w = warningsCard(d, P.warnings(d, ym));
     if (w) container.append(w);
     if (p.accounts.length) container.append(accountsCard(d, ym));
@@ -511,7 +513,48 @@
         h('div', { class: 'stat-grid card-text' }, stat('合計', total), stat('未済', pending)),
         list
       ),
+      sidejobNextCard(d, { compact: false }),
       allocationCard(d)
+    );
+  }
+
+  /**
+   * 来月の副業の入金(予想):副業の予定(追加で出る日を含む)と記録から。月が替わると入金予定に自動で入る。
+   * 入金予定と対応していない依頼元には、対応させるボタンを出す(compact のときは出さない)。
+   */
+  function sidejobNextCard(d, { compact }) {
+    const S = MT.sidejobModel;
+    if (!S || !d.sidejob || !d.sidejob.clients.length) return null;
+    const pv = S.nextPaymentPreview(d, U.todayStr());
+    const unlinked = S.unlinkedClients(d);
+    if (compact && !pv.rows.length) return null;
+    const link = (u) => () => {
+      if (store.update((dd) => S.linkClientToIncome(dd, u.client.id, u.sameName ? u.sameName.id : null))) toast(`${u.client.name}を入金予定と対応させました(予想額が自動で入ります)`);
+    };
+    return h(
+      'section',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: `来月(${U.ymLabel(pv.target)})の副業の入金(予想)` }), h('span', { class: 'group-sum', text: yen(pv.total) })),
+      pv.rows.length
+        ? h(
+            'ul',
+            { class: 'need-list' },
+            pv.rows.map((r) =>
+              h('li', null, h('span', { text: `${r.incomeName}(${r.sources.map((x) => `${x.clientName}:${U.monthLabel(x.workMonth)}に働いた分`).join('・')})` }), h('span', { text: yen(r.to) }))
+            )
+          )
+        : h('p', { class: 'hint', text: '入金予定と対応している依頼元がありません。' }),
+      h('p', { class: 'hint', text: '副業の予定(追加で出る日を含む)と記録から計算しています。月が替わると、この額が入金予定に自動で入ります(今月分の入金予定にも、先月に働いた分が自動で入っています)。' }),
+      !compact && unlinked.length
+        ? [
+            h('h3', { class: 'sp-title', text: '入金予定と対応していない依頼元' }),
+            h(
+              'div',
+              { class: 'button-col' },
+              unlinked.map((u) => btn(u.sameName ? `${u.client.name}:入金予定「${u.sameName.name}」と対応させる` : `${u.client.name}:入金予定を作って対応させる`, { size: 'small', onClick: link(u) }))
+            ),
+          ]
+        : null
     );
   }
 

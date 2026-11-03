@@ -322,6 +322,19 @@
         })
       );
     }
+    // 来月に入る額(予想):月が替わると、入金予定に自動で入る
+    const next = S.nextPaymentPreview(d, U.todayStr());
+    if (next.rows.length) {
+      add(
+        s.body,
+        h('h3', { class: 'form-section-title', text: `来月(${U.ymLabel(next.target)})に入る額(予想)${U.yen(next.total)}円` }),
+        h(
+          'ul',
+          { class: 'report-list' },
+          next.rows.map((r) => h('li', { text: `${r.incomeName}:${r.sources.map((x) => `${x.clientName} ${U.ymLabel(x.workMonth)}分 ${U.man(x.amount)}`).join('・')}` }))
+        )
+      );
+    }
     s.foot.append(btn('閉じる', { variant: 'primary', onClick: () => s.close() }));
   }
 

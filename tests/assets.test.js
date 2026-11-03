@@ -197,6 +197,40 @@ test('価格の自動取得:為替が取れなければ設定の手入力値、�
   assert.ok(r3.messages.some((m) => m.includes('外部に接続できない画面')));
 });
 
+test('価格の自動取得:USD/JPY は URL → 公開の為替レート → 手入力 → 前回の値の順に使う(Finnhub は株価だけ)', async () => {
+  const { a } = fixture();
+  a.settings.fxManual = 148;
+  const asked = [];
+  const fake = (fxJpy) => async (url) => {
+    asked.push(url);
+    if (url.includes('finnhub')) return { ok: true, json: async () => ({ c: 100 }) };
+    if (url.includes('frankfurter')) return fxJpy ? { ok: true, json: async () => ({ amount: 1, base: 'USD', date: '2026-11-13', rates: { JPY: fxJpy } }) } : { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ version: 'v6', results: { X101: 1800 }, errors: [], errorDetails: {} }) }; // 価格取得の URL は USDJPY を返さない
+  };
+  // URL に無ければ、公開の為替レート
+  const r1 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: fake(151.5) });
+  assert.deepEqual(r1.fx, { rate: 151.5, source: 'auto' });
+  assert.ok(r1.messages.some((m) => m.includes('公開の為替レート') && m.includes('2026-11-13')));
+  assert.equal(r1.prices['us:XUS'].price, 100);
+  assert.ok(!asked.some((u) => u.includes('finnhub') && u.includes('JPY'))); // Finnhub には為替を聞かない
+  // 公開の為替レートも取れなければ、手入力の値
+  const r2 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: fake(null) });
+  assert.deepEqual(r2.fx, { rate: 148, source: 'manual' });
+  // 手入力も無ければ、前回の値のまま(日時は変えない)
+  a.settings.fxManual = null;
+  a.fx = { rate: 149, source: 'auto', at: '2026-11-01T00:00:00.000Z' };
+  const r3 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: fake(null) });
+  assert.equal(r3.fx, null);
+  A.applyPriceReport(a, r3, NOW);
+  assert.equal(a.fx.rate, 149);
+  assert.equal(a.fx.at, '2026-11-01T00:00:00.000Z');
+  // 何も無ければ、円に換算できない理由を出す
+  a.fx = { rate: null, source: null, at: null };
+  const r4 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: fake(null) });
+  assert.deepEqual(r4.fx, { rate: null, source: null });
+  assert.ok(r4.messages.some((m) => m.includes('USD/JPY(手入力)')));
+});
+
 test('価格の自動取得:コードが無い銘柄は取りに行かず、理由を付ける(証券会社の違いは関係しない)', async () => {
   const { a } = fixture();
   A.saveHolding(a, { id: 'nocode', broker: '証券C', account: 'tokutei', type: 'fund', code: '', name: 'ファンドZ', quantity: 1, avgPrice: 10000 });

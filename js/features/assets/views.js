@@ -261,8 +261,9 @@
   }
 
   /** 価格が無い銘柄の、取れない理由(画面に出す) */
-  function missingReason(x) {
+  function missingReason(a, x) {
     if (!x.code) return 'コードが未入力です(編集で入れてください)';
+    if (x.type === 'us' && x.priceUsd != null && !a.fx.rate) return 'ドルの株価はありますが、USD/JPY が無いため円に換算できません(設定の「USD/JPY(手入力)」に入れられます)';
     if (x.lastError) return x.lastError;
     const sec = MT.secrets.get();
     if (x.type === 'us' && !sec.finnhubKey) return 'Finnhub のキーが未設定です(ドルで手入力できます)';
@@ -292,7 +293,7 @@
           h('span', { class: 'chip', text: A.label(A.TYPES, x.type) }),
           h('span', { text: `${U.formatNumber(x.quantity, 6)}${unit} × ${priceText}` }),
           x.lastError && !v.missing ? h('span', { class: 'meta-due is-warn', text: `取得失敗:${x.lastError}(前回 ${dateTime(x.priceAt)} の価格)` }) : null,
-          v.missing ? h('span', { class: 'meta-due is-warn', text: `取れない理由:${missingReason(x)}` }) : null,
+          v.missing ? h('span', { class: 'meta-due is-warn', text: `取れない理由:${missingReason(a, x)}` }) : null,
           x.priceSource === 'manual' && !v.missing ? h('span', { text: '手入力の価格' }) : null,
           x.priceSource === 'import' && !v.missing ? h('span', { text: '旧アプリの価格' }) : null,
           h('span', { class: 'chip chip-soft', text: A.label(A.PRIORITIES, x.sellPriority) })

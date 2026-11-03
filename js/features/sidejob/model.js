@@ -298,7 +298,8 @@
 
   /**
    * 予想額:確認済み / 予定 / 合計
-   *  予定 = 入金が未確認の記録 + まだ記録のない予定日(今日以降)× 1 日あたりの見込み額
+   *  予定 = 入金が未確認の記録 + まだ記録のない予定日の見込み
+   *  予定日は今日以降を数える。「追加で出る日」として見込みを入れた日は、今日より前でも(記録を作るまでは)数える
    */
   function forecast(sj, ym, clientId, today) {
     const clients = clientId ? sj.clients.filter((c) => c.id === clientId) : sj.clients;
@@ -308,7 +309,8 @@
     for (const c of clients) {
       const recorded = new Set(sj.records.filter((r) => r.clientId === c.id && r.date.startsWith(ym)).map((r) => r.date));
       for (const date of plannedDates(sj, ym, c)) {
-        if (date < today || recorded.has(date)) continue;
+        if (recorded.has(date)) continue;
+        if (date < today && !dayPlan(sj, c.id, date)) continue; // 過ぎた予定日で記録の無い日は 0(見込みを入れて足した日は数える)
         planned += dayExpected(sj, c, date);
         plannedDays++;
       }
@@ -383,13 +385,12 @@
   // ---- 支払い管理との連携 ----
 
   /**
-   * 支払い管理の入金予定に入れる予定:管理中の月(payments.month)の入金に、
+   * 支払い管理の入金予定に入れる予定:入金の月(target。既定は管理中の月 payments.month)の入金に、
    * 対応する依頼元の働いた月(翌月払いなら前の月)の予想額を入れる。同じ入金に複数の依頼元なら合計。
    */
-  function paymentPlan(d, today) {
+  function paymentPlan(d, today, target = d.payments.month) {
     const sj = d.sidejob;
     const p = d.payments;
-    const target = p.month;
     const rows = new Map();
     for (const c of sj.clients) {
       const inc = c.payment.incomeId ? p.incomes.find((i) => i.id === c.payment.incomeId) : null;
@@ -413,6 +414,12 @@
     return plan.rows.length;
   }
 
+  /** 自動で直す入金予定か:入金済みは変えない。予想が 0 円(記録も予定も無い)のときは、入っている金額を消さない */
+  function shouldSync(inc, to) {
+    if (!inc || inc.done || inc.amount === to) return false;
+    return !(to === 0 && inc.amount !== null);
+  }
+
   /**
    * 自動の反映:対応する入金予定の金額が予想額と違えば、予想額にする(入金済みにした入金は変えない)。
    * 画面を開いたとき・データが変わったときに呼ぶ(app.js の定期処理)。
@@ -423,7 +430,7 @@
     let n = 0;
     for (const r of paymentPlan(d, today).rows) {
       const inc = d.payments.incomes.find((i) => i.id === r.incomeId);
-      if (!inc || inc.done || inc.amount === r.to) continue;
+      if (!shouldSync(inc, r.to)) continue;
       inc.amount = r.to;
       n++;
     }
@@ -433,10 +440,38 @@
   /** 自動の反映で直す入金予定があるか(書き換えずに調べる) */
   function needsPaymentSync(d, today) {
     if (!d.sidejob || !d.payments) return false;
-    return paymentPlan(d, today).rows.some((r) => {
-      const inc = d.payments.incomes.find((i) => i.id === r.incomeId);
-      return inc && !inc.done && inc.amount !== r.to;
-    });
+    return paymentPlan(d, today).rows.some((r) => shouldSync(d.payments.incomes.find((i) => i.id === r.incomeId), r.to));
+  }
+
+  /**
+   * 来月の入金(予想):支払い管理で管理中の月の翌月に入る副業の入金。
+   * 翌月払いなら、今月働いた分(予定と追加で出る日を含む)の予想額。月が替わると入金予定に自動で入る。
+   */
+  function nextPaymentPreview(d, today) {
+    if (!d.sidejob || !d.payments) return { target: null, rows: [], total: 0 };
+    const plan = paymentPlan(d, today, U.ymAdd(d.payments.month, 1));
+    return { ...plan, total: plan.rows.reduce((t, r) => t + r.to, 0) };
+  }
+
+  /** 入金予定と対応していない依頼元と、同じ名前の入金予定(あれば) */
+  function unlinkedClients(d) {
+    if (!d.sidejob || !d.payments) return [];
+    const key = (s) => String(s).replace(/\s+/g, '');
+    return d.sidejob.clients
+      .filter((c) => !c.payment.incomeId)
+      .map((c) => ({ client: c, sameName: d.payments.incomes.find((i) => key(i.name) === key(c.name)) || null }));
+  }
+
+  /** 依頼元を入金予定と対応させる(incomeId が無ければ「副業:名前」の入金予定を作る) */
+  function linkClientToIncome(d, clientId, incomeId) {
+    const c = findClient(d.sidejob, clientId);
+    if (!c || !d.payments) return null;
+    let id = incomeId;
+    if (!id || !d.payments.incomes.some((i) => i.id === id)) {
+      id = MT.paymentsModel.saveIncome(d.payments, { id: U.uid('inc'), name: `副業:${c.name}`, amount: null, fixed: false, targetId: null, done: false, memo: '' });
+    }
+    c.payment.incomeId = id;
+    return id;
   }
 
   /** この入金予定に対応している依頼元(自動で入る入金か) */
@@ -489,6 +524,9 @@
     applyPaymentPlan,
     syncPayments,
     needsPaymentSync,
+    nextPaymentPreview,
+    unlinkedClients,
+    linkClientToIncome,
     clientsForIncome,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

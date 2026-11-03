@@ -318,3 +318,46 @@ test('v5 のデータを開くと v6 になり、副業の予定は見込み(pla
   assert.equal(res.data.schemaVersion, 6);
   assert.deepEqual(res.data.sidejob.schedule['2026-11'].A, { off: ['2026-11-02'], extra: ['2026-11-04'], plans: {} });
 });
+
+test('追加で出る日:今日より前の日に入れても、記録を作るまでは予想額に入る(ふつうの予定日は今日以降だけ)', () => {
+  const { sj, B } = fixture();
+  const before = S.forecast(sj, '2026-11', 'B', TODAY); // 今日は 2026-11-15
+  // 2026-11-02(月)は依頼元B の曜日パターン外。今日より前の日に、見込み 15,000 円で追加
+  S.setExtraDay(sj, 'B', '2026-11-02', { base: 15000, items: [] });
+  const after = S.forecast(sj, '2026-11', 'B', TODAY);
+  assert.equal(after.planned, before.planned + 15000);
+  assert.equal(after.plannedDays, before.plannedDays + 1);
+  // ふつうの予定日(土曜)は今日以降の 11/21・11/28 だけを数える(11/7・11/14 は記録が無いので 0)
+  assert.equal(before.planned, 2 * S.dailyExpected(B));
+  // 記録を作ると、見込みではなく記録の額になる
+  S.saveRecord(sj, { ...S.newDraft(B, '2026-11-02', S.dayPlan(sj, 'B', '2026-11-02')), base: 12000, items: [] });
+  const recorded = S.forecast(sj, '2026-11', 'B', TODAY);
+  assert.equal(recorded.unconfirmed, 12000);
+  assert.equal(recorded.planned, before.planned);
+});
+
+test('来月の入金(予想):翌月払いは今月働いた分。対応していない依頼元は、同じ名前の入金予定に対応させられる', () => {
+  const { d, sj, A, B } = fixture();
+  d.payments.month = '2026-11';
+  P.saveIncome(d.payments, { id: 'incB', name: '依頼元B', amount: 50000, fixed: false });
+  // 依頼元B は同じ名前の入金予定がある → 対応させる候補
+  const un = S.unlinkedClients(d);
+  assert.deepEqual(un.map((u) => [u.client.id, u.sameName && u.sameName.id]), [['A', null], ['B', 'incB']]);
+  S.linkClientToIncome(d, 'B', 'incB');
+  assert.equal(B.payment.incomeId, 'incB');
+  // 依頼元A は入金予定を作って対応させる
+  const created = S.linkClientToIncome(d, 'A', null);
+  assert.equal(d.payments.incomes.find((i) => i.id === created).name, '副業:依頼元A');
+  // 来月(12 月)の入金 = 11 月に働いた分(追加で出る日を含む)
+  S.setExtraDay(sj, 'B', '2026-11-02', { base: 15000, items: [] });
+  const pv = S.nextPaymentPreview(d, TODAY);
+  assert.equal(pv.target, '2026-12');
+  const rowB = pv.rows.find((r) => r.incomeId === 'incB');
+  assert.equal(rowB.to, S.forecast(sj, '2026-11', 'B', TODAY).total);
+  assert.equal(pv.total, pv.rows.reduce((t, r) => t + r.to, 0));
+  // 今月の入金予定には 10 月に働いた分(記録が無く 0 円)→ 入っている 50,000 円は消さない。空欄なら 0 円を入れる
+  S.syncPayments(d, TODAY);
+  assert.equal(d.payments.incomes.find((i) => i.id === 'incB').amount, 50000);
+  assert.equal(d.payments.incomes.find((i) => i.id === created).amount, 0); // 空欄の入金予定には予想額(0 円)が入る
+  assert.ok(A);
+});

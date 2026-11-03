@@ -3035,3 +3035,75 @@ html.is-shot .theme-toggle {
   color: var(--negative);
   font-weight: 700;
 }
+
+/* 副業:全体の予定(依頼元ごとの色。● 予定 ■ 追加で出る ○ 休む) */
+.cli-1 {
+  --cli: var(--series-1);
+}
+.cli-2 {
+  --cli: var(--series-2);
+}
+.cli-3 {
+  --cli: var(--series-3);
+}
+.cli-4 {
+  --cli: var(--series-4);
+}
+.cli-5 {
+  --cli: var(--series-5);
+}
+.cal-cell.is-multi {
+  color: var(--text-2);
+}
+.cal-cell.is-multi.has-plan {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 700;
+}
+.cal-dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  min-height: 7px;
+  margin-top: 2px;
+}
+.cal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cli);
+}
+.cal-dot.is-extra {
+  border-radius: 1px;
+}
+.cal-dot.is-off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--cli);
+}
+.lg-cli {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+.lg-cli::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--cli);
+}
+.lg-shape {
+  color: var(--text-3);
+}
+/* 全体のカレンダーでは、記録ありの印を右上に(依頼元の印と重ならないように) */
+.cal-cell.is-multi .cal-mark {
+  top: 2px;
+  right: 5px;
+  bottom: auto;
+}
+.group-sum {
+  white-space: nowrap;
+}
+
