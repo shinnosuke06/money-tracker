@@ -281,7 +281,7 @@
         field('国内株・投資信託の価格取得URL', url, '「?codes=コード1,コード2」を付けて問い合わせます。返事の version が "v6" のものに対応しています。'),
         field('Finnhub の APIキー(米国株)', h('div', { class: 'input-with-btn' }, key, showKey), 'キーが無いときは、米国株の株価をドルで手入力します。'),
         h('div', { class: 'form-2col' }, field('為替のコード', fxCode), field('USD/JPY(手入力)', fxManual.el)),
-        h('p', { class: 'form-hint', text: 'USD/JPY は、上の URL に為替のコードも一緒に問い合わせて取得します。取れないときは手入力の値を使います。' }),
+        h('p', { class: 'form-hint', text: 'USD/JPY は、上の URL に為替のコードも一緒に問い合わせ、無ければキー不要の公開の為替レートを使います(Finnhub は米国株の株価だけ)。どちらも取れないとき(試用ページなど外に接続できない場所)は、手入力の値を使います。' }),
         field('税率(課税口座の含み益・配当)', tax.el, '既定は 20.315%。NISA は 0% として計算します。'),
         err
       ),
