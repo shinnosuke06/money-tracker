@@ -294,7 +294,7 @@
 
     const monthly = data.monthly;
     monthly.categories = CATEGORIES.map((c) => ({ ...c }));
-    monthly.items = ITEMS.map((it) => ({ id: it.id, categoryId: it.cat, name: it.name, lastUpdated: null }));
+    monthly.items = ITEMS.map((it) => ({ id: it.id, categoryId: it.cat, name: it.name, lastUpdated: null, reference: false }));
     monthly.records = {};
 
     months.forEach((ym, i) => {

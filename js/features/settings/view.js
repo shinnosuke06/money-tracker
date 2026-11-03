@@ -1,5 +1,6 @@
 /*
- * 設定:データの書き出し・読み込み、価格の自動取得、旧アプリの取り込み、サンプル、元に戻す、全削除
+ * 設定:データの書き出し・読み込み、Excel の過去記録の取り込み、価格の自動取得、旧アプリの取り込み、
+ *       サンプル、元に戻す、全削除
  */
 (function (root) {
   'use strict';
@@ -55,6 +56,8 @@
         fileInput,
         h('p', { class: 'hint', text: lastExport ? `この端末で最後に書き出した日時:${formatDateTime(lastExport)}` : 'この端末ではまだ書き出していません。' })
       ),
+
+      importCard(d),
 
       priceSettingsCard(d),
 
@@ -153,7 +156,38 @@
         h('div', { class: 'button-col' }, btn('すべて削除する', { variant: 'danger', onClick: clearFlow }))
       ),
 
-      h('p', { class: 'app-version', text: 'マネートラッカー 段階4(ポケカ在庫・副業収入)' })
+      h('p', { class: 'app-version', text: 'マネートラッカー 段階4(ポケカ在庫・副業収入)+ Excel の取り込み' })
+    );
+  }
+
+  /** Excel の過去記録の取り込み(月末記録・カード推移)と、その履歴・元に戻す */
+  function importCard(d) {
+    const IM = MT.importsModel;
+    const UI = MT.importsUI;
+    const log = d.imports ? d.imports.log : [];
+    const target = IM.undoTarget(d);
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: 'Excel の過去記録を取り込む' }),
+      h('p', { text: 'Excel で付けていた表を、貼り付け(コピー)か CSV ファイルで取り込みます。取り込む前に、月と行の対応や、月ごとの合計を確認できます。' }),
+      h(
+        'div',
+        { class: 'button-col' },
+        btn('月末記録(口座資産の表)を取り込む', { icon: 'upload', variant: 'primary', onClick: () => UI.open('monthly') }),
+        btn('カード推移の表を取り込む', { icon: 'upload', onClick: () => UI.open('cards') })
+      ),
+      h('p', { class: 'hint', text: '表の形:1列目が項目名(カード名)、2列目以降が月ごとの金額。見出しの月名は使わず、最初の月列の年月を指定して、右へ 1 か月ずつ進めて読みます。' }),
+      h('h3', { class: 'sp-title', text: '取り込みの履歴' }),
+      log.length
+        ? h(
+            'ul',
+            { class: 'report-list' },
+            log.slice(0, 5).map((e) => h('li', { text: `${formatDateTime(e.at)} ${IM.describe(e)}${e.fileName ? `(${e.fileName})` : ''}${e.undone ? '(元に戻し済み)' : ''}` }))
+          )
+        : h('p', { class: 'hint', text: 'まだ取り込んでいません。' }),
+      h('div', { class: 'button-col' }, Object.assign(btn('直前の取り込みを元に戻す', { onClick: () => UI.undoFlow() }), { disabled: !target })),
+      h('p', { class: 'hint', text: target ? `元に戻せる取り込み:${formatDateTime(target.at)} ${IM.describe(target)}` : '元に戻せる取り込みはありません。' })
     );
   }
 
@@ -782,5 +816,5 @@
 
   MT.views = MT.views || {};
   MT.views.settings = { render, tab: 'more' };
-  MT.settingsView = { loadSampleFlow };
+  MT.settingsView = { loadSampleFlow, exportFlow };
 })(window);

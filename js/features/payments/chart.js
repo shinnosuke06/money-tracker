@@ -37,7 +37,7 @@
       datasets = [{ label: '月末残高', data: hist.map((x) => (x.balance == null ? null : x.balance)), ...C.barStyle(c, c.series[0]) }];
     } else {
       datasets = [
-        { label: '収入', data: hist.map((x) => x.income), ...C.barStyle(c, c.series[0]) },
+        { label: '収入', data: hist.map((x) => (x.income == null ? null : x.income)), ...C.barStyle(c, c.series[0]) },
         { label: '支払', data: hist.map((x) => x.payment), ...C.barStyle(c, c.series[1]) },
       ];
     }
@@ -59,7 +59,7 @@
               footer: (items) => {
                 if (!items.length) return '';
                 const x = hist[items[0].dataIndex];
-                if (mode === 'flow') return `差:${U.yenSigned(x.income - x.payment)}円`;
+                if (mode === 'flow') return x.income == null ? '収入:未入力' : `差:${U.yenSigned(x.income - x.payment)}円`;
                 if (mode === 'category') return `合計:${U.yen(x.payment)}円`;
                 return '';
               },

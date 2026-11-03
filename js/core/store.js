@@ -13,13 +13,14 @@
  *   v1 → v2:支払い管理(payments)を追加(js/features/payments/model.js)
  *   v2 → v3:資産管理(assets)を追加(js/features/assets/model.js)
  *   v3 → v4:ポケカ在庫(inventory)と副業収入(sidejob)を追加(js/features/inventory/model.js)
+ *   v4 → v5:月末記録の参考行と、Excel の取り込みの履歴(imports)を追加(js/features/monthly/model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 4;
+  const SCHEMA_VERSION = 5;
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

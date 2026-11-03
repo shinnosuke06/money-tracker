@@ -2,7 +2,7 @@
  * 月末記録:画面
  *  - 前月の記録がまだなら上に案内
  *  - 総資産と前月比
- *  - 表(横に月、縦に項目)。セルをタップして入力
+ *  - 表(横に月、縦に項目)。セルをタップして入力。参考行(含み益など)は総資産の下に分けて出す
  *  - 総資産の推移グラフ
  */
 (function (root) {
@@ -221,7 +221,8 @@
           months.map((ym) => h('td', { class: 'col-month num', text: U.yen(M.categoryTotal(m, ym, g.category.id)) }))
         )
       );
-      if (!g.items.length) {
+      const counted = g.items.filter((it) => !it.reference);
+      if (!counted.length) {
         rows.push(
           h(
             'tr',
@@ -231,7 +232,7 @@
           )
         );
       }
-      for (const it of g.items) rows.push(renderItemRow(m, months, it, stale.has(it.id)));
+      for (const it of counted) rows.push(renderItemRow(m, months, it, stale.has(it.id)));
     }
 
     rows.push(
@@ -255,6 +256,19 @@
         })
       )
     );
+    // 参考行:記録はするが、小計・総資産には含めない
+    const refs = M.referenceItems(m);
+    if (refs.length) {
+      rows.push(
+        h(
+          'tr',
+          { class: 'row-cat row-ref' },
+          h('th', { class: 'col-name', scope: 'row', text: '参考(合計に含めない)' }),
+          months.map(() => h('td', { class: 'col-month' }))
+        )
+      );
+      for (const it of refs) rows.push(renderItemRow(m, months, it, stale.has(it.id)));
+    }
     rows.push(
       h(
         'tr',
@@ -423,7 +437,7 @@
   /** その月の、未確認・未入力の最初の項目から順番に入力する */
   function startSequence(ym) {
     const m = monthly();
-    const items = M.orderedItems(m);
+    const items = M.displayItems(m);
     if (!items.length) return;
     const first = items.find((it) => !M.isConfirmed(m, ym, it.id)) || items[0];
     state.focusYM = ym;
@@ -492,10 +506,10 @@
       }
       current = id;
       const cat = M.findCategory(m, it.categoryId);
-      const list = M.orderedItems(m);
+      const list = M.displayItems(m);
       const pos = list.findIndex((x) => x.id === id) + 1;
       s.setTitle(it.name);
-      sub.textContent = `${U.ymLabel(ym)}末 ・ ${cat ? cat.name : ''}(${pos}/${list.length})`;
+      sub.textContent = `${U.ymLabel(ym)}末 ・ ${it.reference ? '参考行(合計に含めない)' : cat ? cat.name : ''}(${pos}/${list.length})`;
 
       const pk = M.prevRecordKey(m, ym);
       prevValue = pk ? M.getValue(m, pk, id) : null;

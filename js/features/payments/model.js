@@ -15,6 +15,7 @@
  *   allocation: { mode: "auto"|"manual", items: [{ incomeId, accountId, amount }] },
  *       // 振り分け。auto のときは毎回計算し直す。手で直すと manual になる
  *   history: [{ month, income, payment, balance, catTotals, details, incomeDetails }],
+ *       // income と balance は null(未入力)のことがある(Excel のカード推移から作った月など)
  *   notice: { type: "rollover", month } | null,   // 月替わりの案内
  *   memo: ""
  * }
@@ -144,7 +145,7 @@
         });
     return {
       month: h.month,
-      income: cleanAmount(h.income) || 0,
+      income: cleanAmount(h.income),
       payment: cleanAmount(h.payment) || 0,
       balance: cleanAmount(h.balance),
       catTotals,

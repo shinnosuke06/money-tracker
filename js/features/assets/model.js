@@ -22,6 +22,7 @@
  *   fx: { rate, source, at },         // 直近の更新で使った USD/JPY(auto / manual)
  *   lastUpdateAt,
  *   settings: { taxRate, fxManual, fxCode, reflect: { groupBy, map, manualMap } },
+ *       // groupBy:broker(証券会社ごと)/ account(口座区分ごと)/ brokerType(証券会社×種別)
  *   recent: { broker, account, type } // 前回の入力(追加のときの初期値)
  * }
  *
@@ -57,6 +58,12 @@
   ];
   // 円グラフ・集計の「種別」(保有の種別 + 手入力の区分)
   const KINDS = [...TYPES, ...MANUAL_CATEGORIES.map((c) => ({ id: `m_${c.id}`, label: `${c.label}(手入力)` }))];
+  // 月末記録への反映のまとめ方
+  const REFLECT_GROUPS = [
+    { id: 'broker', label: '証券会社ごと' },
+    { id: 'account', label: '口座区分ごと' },
+    { id: 'brokerType', label: '証券会社×種別' },
+  ];
 
   const DEFAULT_TAX = 0.20315;
   const US_WITHHOLDING = 0.1; // 米国株の配当にかかる米国の源泉税
@@ -182,14 +189,14 @@
     const r = s.reflect && typeof s.reflect === 'object' ? s.reflect : {};
     const strMap = (m) => {
       const out = {};
-      if (m && typeof m === 'object') for (const [k, v] of Object.entries(m)) if (typeof v === 'string' && v) out[text(k)] = v;
+      if (m && typeof m === 'object') for (const [k, v] of Object.entries(m)) if (typeof v === 'string' && v) out[text(k, 80)] = v; // 「証券会社|種別」のキーも入る長さ
       return out;
     };
     a.settings = {
       taxRate: typeof s.taxRate === 'number' && s.taxRate >= 0 && s.taxRate < 1 ? s.taxRate : DEFAULT_TAX,
       fxManual: num(s.fxManual) || null,
       fxCode: text(s.fxCode, 20) || 'USDJPY',
-      reflect: { groupBy: r.groupBy === 'account' ? 'account' : 'broker', map: strMap(r.map), manualMap: strMap(r.manualMap) },
+      reflect: { groupBy: oneOf(REFLECT_GROUPS, r.groupBy, 'broker'), map: strMap(r.map), manualMap: strMap(r.manualMap) },
     };
     const rec = raw.recent && typeof raw.recent === 'object' ? raw.recent : {};
     a.recent = { broker: text(rec.broker), account: oneOf(ACCOUNTS, rec.account, 'tokutei'), type: oneOf(TYPES, rec.type, 'jp') };
@@ -574,15 +581,38 @@
 
   // ---- 月末記録への反映 ----
 
-  /** 反映のまとまり(証券会社ごと、または口座区分ごと)。手入力の資産は 1 件ずつ */
+  /** 証券会社×種別のまとまりのキー(「証券A|jp」) */
+  const brokerTypeKey = (broker, type) => `${broker}|${type}`;
+
+  /**
+   * 反映のまとまり(証券会社ごと / 口座区分ごと / 証券会社×種別)。手入力の資産は 1 件ずつ。
+   * 証券会社×種別は、証券会社が出てきた順 → 種別(国内株・米国株・投資信託)の順に並べる。
+   */
   function reflectGroups(a) {
     const s = summary(a);
     const by = a.settings.reflect.groupBy;
     const groups = [];
-    const source = by === 'account' ? s.byAccount : s.byBroker;
-    for (const [key, g] of source) {
-      if (key === 'manual' || key === MANUAL_BROKER) continue;
-      groups.push({ key, label: by === 'account' ? label(ACCOUNTS, key) : key, value: g.value, missing: g.missing });
+    if (by === 'brokerType') {
+      const map = new Map();
+      const brokerOrder = [];
+      for (const r of s.rows) {
+        if (r.source !== 'holding') continue;
+        if (!brokerOrder.includes(r.broker)) brokerOrder.push(r.broker);
+        const key = brokerTypeKey(r.broker, r.kind);
+        if (!map.has(key)) map.set(key, { key, label: `${r.broker}・${label(TYPES, r.kind)}`, value: 0, missing: 0, broker: r.broker, type: r.kind });
+        const g = map.get(key);
+        if (r.missing) g.missing++;
+        else g.value += r.value;
+      }
+      const typeOrder = (t) => TYPES.findIndex((x) => x.id === t);
+      const sorted = [...map.values()].sort((x, y) => brokerOrder.indexOf(x.broker) - brokerOrder.indexOf(y.broker) || typeOrder(x.type) - typeOrder(y.type));
+      for (const g of sorted) groups.push({ key: g.key, label: g.label, value: g.value, missing: g.missing });
+    } else {
+      const source = by === 'account' ? s.byAccount : s.byBroker;
+      for (const [key, g] of source) {
+        if (key === 'manual' || key === MANUAL_BROKER) continue;
+        groups.push({ key, label: by === 'account' ? label(ACCOUNTS, key) : key, value: g.value, missing: g.missing });
+      }
     }
     const manual = a.manual.map((m) => ({ key: m.id, label: m.name, value: m.value, missing: 0 }));
     return { groups, manual };
@@ -635,6 +665,7 @@
     MANUAL_CATEGORIES,
     PRIORITIES,
     KINDS,
+    REFLECT_GROUPS,
     DEFAULT_TAX,
     US_WITHHOLDING,
     MANUAL_BROKER,
@@ -674,6 +705,7 @@
     dividendNetFactor,
     dividendPerPayment,
     dividendCalendar,
+    brokerTypeKey,
     reflectGroups,
     reflectPlan,
     reflectToMonthly,

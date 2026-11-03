@@ -706,7 +706,7 @@
                 h(
                   'span',
                   { class: 'hist-nums' },
-                  h('span', null, h('small', { text: '収入' }), U.yen(x.income)),
+                  h('span', null, h('small', { text: '収入' }), x.income == null ? '—' : U.yen(x.income)),
                   h('span', null, h('small', { text: '支払' }), U.yen(x.payment)),
                   h('span', null, h('small', { text: '月末残高' }), x.balance == null ? '—' : U.yen(x.balance))
                 )
@@ -730,9 +730,9 @@
       h(
         'dl',
         { class: 'info-list' },
-        row('収入', yen(x.income)),
+        row('収入', x.income == null ? '未入力' : yen(x.income)),
         row('支払', yen(x.payment)),
-        row('差', `${U.yenSigned(x.income - x.payment)}円`, x.income - x.payment < 0 ? 'is-neg' : ''),
+        x.income == null ? row('差', '—') : row('差', `${U.yenSigned(x.income - x.payment)}円`, x.income - x.payment < 0 ? 'is-neg' : ''),
         row('月末残高', x.balance == null ? '—' : yen(x.balance))
       ),
       h('h3', { class: 'form-section-title', text: 'カテゴリ別' }),

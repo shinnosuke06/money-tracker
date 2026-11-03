@@ -26,7 +26,7 @@
         ),
         h('h1', { class: 'page-title page-title-sub', text: '項目と区分の編集' })
       ),
-      h('p', { class: 'hint page-hint', text: '名前をタップすると変更できます。矢印で並べ替え、「…」で移動・削除ができます。' })
+      h('p', { class: 'hint page-hint', text: '名前をタップすると変更できます。矢印で並べ替え、「…」で移動・削除・参考行(小計・総資産に含めない)の切り替えができます。' })
     );
 
     for (const [ci, g] of M.groups(m).entries()) {
@@ -101,6 +101,7 @@
             'button',
             { type: 'button', class: 'edit-name', onClick: () => renameItemFlow(it) },
             it.name,
+            it.reference ? h('small', { class: 'edit-sub', text: '参考行(小計・総資産に含めない)' }) : null,
             isPaymentAccount(it.id) ? h('small', { class: 'edit-sub', text: '支払いの口座' }) : null
           ),
           moveButtons('item', it.id, i === 0, i === g.items.length - 1, it.name),
@@ -194,6 +195,12 @@
       actions: [
         { label: '名前を変更', onSelect: () => renameItemFlow(it) },
         others.length ? { label: '別の区分へ移動', onSelect: () => moveItemFlow(it, others) } : null,
+        {
+          label: it.reference ? '小計・総資産に含める(参考行をやめる)' : '参考行にする(小計・総資産に含めない)',
+          onSelect: () => {
+            if (store.update((d) => M.setReference(d.monthly, it.id, !it.reference))) toast(it.reference ? '小計・総資産に含めます' : '参考行にしました(合計には含めません)');
+          },
+        },
         { label: '項目を削除', danger: true, onSelect: () => deleteItemFlow(it) },
       ],
     });

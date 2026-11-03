@@ -42,7 +42,7 @@ test('段階3(v3)のデータを v4 に移行しても、ほかの区画は変�
   const res = store.prepare(JSON.parse(JSON.stringify(v3)));
   assert.equal(res.ok, true);
   assert.equal(res.migrated, true);
-  assert.equal(res.data.schemaVersion, 4);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION); // v4 以降まで続けて移行
   assert.equal(res.data.monthly.items[0].name, '架空銀行');
   assert.equal(res.data.assets.manual[0].name, '手入力');
   assert.deepEqual(res.data.inventory.items, []);

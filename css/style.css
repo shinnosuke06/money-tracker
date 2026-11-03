@@ -2868,3 +2868,159 @@ html.is-shot .theme-toggle {
 .shot-table td {
   border-bottom-color: var(--line-strong);
 }
+
+/* =========================================================
+   Excel の過去記録の取り込み
+   ========================================================= */
+
+/* 月末記録の表:参考行(小計・総資産に含めない)の見出し */
+.row-ref th {
+  color: var(--text-2);
+}
+
+.sheet-wide {
+  max-width: 640px;
+}
+.imp-enc {
+  flex: 1 1 9em;
+  width: auto;
+  min-width: 0;
+}
+.imp-summary {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.imp-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.imp-col {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.imp-col input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.imp-col.is-off .imp-col-text {
+  color: var(--text-3);
+}
+.imp-col-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+.imp-col-month {
+  font-weight: 700;
+  font-size: 14px;
+}
+.imp-col-head {
+  color: var(--text-2);
+}
+.imp-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.imp-tag {
+  display: inline-flex;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.imp-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.imp-row.is-skip .imp-row-name {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-strong);
+}
+.imp-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.imp-row-name {
+  font-weight: 700;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.imp-row-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.imp-row-ctrl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+@media (min-width: 560px) {
+  .imp-row-ctrl {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .imp-row-ctrl.is-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.imp-month {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.imp-month-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.imp-month-sub {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.imp-diff {
+  color: var(--text-2);
+}
+.imp-diff.is-ok {
+  color: var(--positive);
+  font-weight: 600;
+}
+.imp-diff.is-off {
+  color: var(--negative);
+  font-weight: 700;
+}

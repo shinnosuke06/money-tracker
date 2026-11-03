@@ -591,16 +591,13 @@
     const d = store.get();
     const a = d.assets;
     const r = JSON.parse(JSON.stringify(a.settings.reflect));
-    const s = openSheet({ title: '月末記録への反映先', description: 'まとまりごとに、書き込む月末記録の項目を選びます。同じ項目を選ぶと合計して書き込みます。', className: 'sheet-form' });
+    const s = openSheet({ title: '月末記録への反映先', description: 'まとまりごとに、書き込む月末記録の項目を選びます。同じ項目を選ぶと合計して書き込みます。「証券会社×種別」は、証券会社ごとに国内株・米国株・投資信託を分けます。', className: 'sheet-form' });
     const itemOptions = [{ value: '', label: '反映しない' }].concat(
       MM.groups(d.monthly).flatMap((g) => g.items.map((it) => ({ value: it.id, label: `${g.category.name} / ${it.name}` })))
     );
     const list = h('div', { class: 'map-list' });
     const by = MT.forms.segmented(
-      [
-        { value: 'broker', label: '証券会社ごと' },
-        { value: 'account', label: '口座区分ごと' },
-      ],
+      A.REFLECT_GROUPS.map((g) => ({ value: g.id, label: g.label })),
       r.groupBy,
       {
         label: 'まとめ方',

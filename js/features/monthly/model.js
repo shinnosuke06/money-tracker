@@ -3,7 +3,8 @@
  *
  * monthly = {
  *   categories: [{ id, name }],                       // 区分。配列の順番がそのまま表示順
- *   items:      [{ id, categoryId, name, lastUpdated }], // 項目。区分内の表示順は配列の順番
+ *   items:      [{ id, categoryId, name, lastUpdated, reference }], // 項目。区分内の表示順は配列の順番
+ *               // reference = true は「参考行」(含み益など)。記録はするが、小計・総資産には含めない
  *   records: {
  *     "YYYY-MM": {
  *       values:    { [itemId]: 円の整数 },
@@ -91,8 +92,25 @@
     return groups(m).flatMap((g) => g.items);
   }
 
+  const isCounted = (it) => !it.reference;
+
+  /** 小計・総資産に含める項目(参考行を除く) */
+  function countedItems(m) {
+    return orderedItems(m).filter(isCounted);
+  }
+
+  /** 参考行(小計・総資産に含めない項目) */
+  function referenceItems(m) {
+    return orderedItems(m).filter((it) => !isCounted(it));
+  }
+
+  /** 表と入力の順番:含める項目(区分順)→ 参考行 */
+  function displayItems(m) {
+    return [...countedItems(m), ...referenceItems(m)];
+  }
+
   function nextItemId(m, itemId) {
-    const list = orderedItems(m);
+    const list = displayItems(m);
     const i = list.findIndex((it) => it.id === itemId);
     return i >= 0 && i < list.length - 1 ? list[i + 1].id : null;
   }
@@ -120,17 +138,18 @@
     return total;
   }
 
+  /** 区分の小計(参考行は含めない) */
   function categoryTotal(m, ym, categoryId) {
     return sumItems(
       m,
       ym,
-      m.items.filter((it) => it.categoryId === categoryId)
+      m.items.filter((it) => it.categoryId === categoryId && isCounted(it))
     );
   }
 
-  /** 総資産 = 区分に属するすべての項目の合計 */
+  /** 総資産 = 区分に属する項目の合計(参考行は含めない) */
   function monthTotal(m, ym) {
-    return sumItems(m, ym, orderedItems(m));
+    return sumItems(m, ym, countedItems(m));
   }
 
   /** 直前の記録との差。最初の月は null */
@@ -142,10 +161,10 @@
     return { prev, prevTotal, total, diff: total - prevTotal };
   }
 
-  /** その月の入力状況 */
+  /** その月の入力状況(参考行は数えない) */
   function monthStatus(m, ym) {
     const st = { confirmed: 0, carried: 0, empty: 0, total: 0 };
-    for (const it of orderedItems(m)) {
+    for (const it of countedItems(m)) {
       st.total++;
       if (getValue(m, ym, it.id) === null) st.empty++;
       else if (isConfirmed(m, ym, it.id)) st.confirmed++;
@@ -186,9 +205,9 @@
     }));
   }
 
-  /** グラフ用:項目ごとの系列(表示順) */
+  /** グラフ用:項目ごとの系列(表示順。参考行は積み上げに入れない) */
   function seriesByItem(m, monthList) {
-    return orderedItems(m).map((it) => ({
+    return countedItems(m).map((it) => ({
       key: it.id,
       label: it.name,
       values: monthList.map((ym) => getValue(m, ym, it.id) || 0),
@@ -292,11 +311,18 @@
     m.categories = m.categories.filter((c) => c.id !== id);
   }
 
-  function addItem(m, categoryId, name) {
+  /** 項目を足す。reference: true なら参考行(小計・総資産に含めない) */
+  function addItem(m, categoryId, name, { reference = false } = {}) {
     if (!findCategory(m, categoryId)) throw new Error('区分が見つかりません');
-    const it = { id: U.uid('itm'), categoryId, name: cleanName(name) || '新しい項目', lastUpdated: null };
+    const it = { id: U.uid('itm'), categoryId, name: cleanName(name) || '新しい項目', lastUpdated: null, reference: reference === true };
     m.items.push(it);
     return it;
+  }
+
+  /** 参考行にする(true)/ 小計・総資産に含める(false) */
+  function setReference(m, id, reference) {
+    const it = findItem(m, id);
+    if (it) it.reference = reference === true;
   }
 
   function renameItem(m, id, name) {
@@ -370,6 +396,7 @@
         categoryId,
         name: cleanName(it.name) || '名称未設定',
         lastUpdated: U.isDateStr(it.lastUpdated) ? it.lastUpdated : null,
+        reference: it.reference === true,
       });
     }
 
@@ -405,11 +432,18 @@
 
   if (MT.store) {
     MT.store.defineSection('monthly', { create, normalize, hasContent, summarize });
+    // v4 → v5:月末記録の参考行(reference)と、取り込みの履歴(imports)を足す。
+    // どちらも読み込み時の点検(normalize)で既定値が入るので、ここでは版だけ上げる。
+    MT.store.addMigration(4, (d) => {
+      d.schemaVersion = 5;
+      return d;
+    });
   }
 
   MT.monthlyModel = {
     NAME_MAX,
     MEMO_MAX,
+    DEFAULT_CATEGORIES,
     create,
     normalize,
     months,
@@ -420,6 +454,9 @@
     findCategory,
     groups,
     orderedItems,
+    countedItems,
+    referenceItems,
+    displayItems,
     nextItemId,
     getValue,
     isConfirmed,
@@ -442,6 +479,7 @@
     moveCategory,
     deleteCategory,
     addItem,
+    setReference,
     renameItem,
     moveItem,
     changeItemCategory,
