@@ -1506,8 +1506,8 @@ button {
   white-space: nowrap;
 }
 .acct-balance.is-missing {
-  color: var(--text-3);
-  font-weight: 600;
+  color: var(--negative);
+  font-weight: 700;
   font-size: 13px;
 }
 .acct-flow {
@@ -1722,9 +1722,14 @@ button {
   font-weight: 500;
   color: var(--text-3);
 }
+/* 完全に未入力(請求額・内訳・入金額・残高のどれも空欄):赤で「未入力」 */
 .pay-amount.is-missing {
-  color: var(--warn-text);
+  color: var(--negative);
   font-size: 13px;
+  font-weight: 700;
+}
+.pay-row.is-unentered {
+  box-shadow: inset 3px 0 0 var(--negative);
 }
 .pay-row.is-done .pay-name,
 .pay-row.is-done .pay-amount {
@@ -2762,9 +2767,15 @@ html.is-shot .view {
   outline: 2px solid var(--text);
   outline-offset: -2px;
 }
+.cal-amt {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--accent-text);
+}
 .cal-mark {
   position: absolute;
-  bottom: 3px;
+  bottom: 1px;
   font-size: 7px;
   color: var(--positive);
 }

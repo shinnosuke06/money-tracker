@@ -277,13 +277,13 @@
             items.push({ name: extra.name, amount: extra.amount });
           }
           const daysAgo = Math.round((now - new Date(date + 'T00:00:00')) / 86400000);
-          records.push({ id: `smp_rec_${n++}`, date, clientId: c.id, base: c.baseAmount, items, content: items.map((x) => x.name).join('、'), memo: '', confirmed: k < 0 || daysAgo > 10 });
+          records.push({ id: `smp_rec_${n++}`, date, clientId: c.id, base: c.baseAmount, items, content: MT.sidejobModel.contentOf(items), memo: '', confirmed: k < 0 || daysAgo > 10 });
         });
       }
     }
     // 今月、依頼元A の次の予定日を 1 日休みにしておく
     const next = MT.sidejobModel.plannedDates({ schedule: {} }, cur, clients[0]).find((d) => d > today);
-    const schedule = next ? { [cur]: { [clients[0].id]: { off: [next], extra: [] } } } : {};
+    const schedule = next ? { [cur]: { [clients[0].id]: { off: [next], extra: [], plans: {} } } } : {};
     return { clients, records: records.map((r) => MT.sidejobModel.cleanRecord(r)), schedule };
   }
 

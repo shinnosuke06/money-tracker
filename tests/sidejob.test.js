@@ -66,7 +66,7 @@ test('新しい記録:基本額と既定の作業項目を最初から選び、�
   const rid = S.saveRecord(sj, draft);
   const r = sj.records.find((x) => x.id === rid);
   assert.equal(S.recordTotal(r), 8000 + 2000 + 3000 + 1800);
-  assert.equal(r.content, '作業項目X、作業項目Z、作業項目Y');
+  assert.equal(r.content, '作業項目X0.2、作業項目Z0.3、作業項目Y0.18'); // 項目名 + 万円の数
   assert.equal(r.memo, 'メモ');
   assert.equal(r.confirmed, false);
 });
@@ -243,4 +243,78 @@ test('サンプル:副業も入っていて、予想額が出せる', () => {
   assert.ok(d.sidejob.records.length > 10);
   const f = S.forecast(d.sidejob, '2026-11', null, TODAY);
   assert.equal(f.total, f.confirmed + f.scheduled);
+});
+
+test('内容の文章:作業項目名に、金額を万円にした数を付ける(10,000円 → 1、1,000円 → 0.1)', () => {
+  assert.equal(S.contentOf([{ name: '作業項目K', amount: 10000 }, { name: '作業項目N', amount: 1000 }]), '作業項目K1、作業項目N0.1');
+  assert.equal(S.manNumber(12500), '1.25');
+  assert.equal(S.manNumber(0), '0');
+  // 読み込み直すと、作業項目のある記録の文章は今の書き方にそろう(作業項目の無い旧データは文章のまま)
+  const { d, sj, A } = fixture();
+  sj.records.push({ id: 'r1', date: '2026-11-02', clientId: 'A', base: 8000, items: [{ name: '作業項目X', amount: 2000 }], content: '作業項目X', memo: '', confirmed: false });
+  sj.records.push({ id: 'r2', date: '2026-11-04', clientId: 'A', base: 8000, items: [], content: '旧データの文章', memo: '', confirmed: false });
+  const again = store.prepare(JSON.parse(JSON.stringify(d))).data.sidejob.records;
+  assert.equal(again.find((r) => r.id === 'r1').content, '作業項目X0.2');
+  assert.equal(again.find((r) => r.id === 'r2').content, '旧データの文章');
+  assert.ok(A);
+});
+
+test('追加で出る日:依頼元と基本額・作業項目を選んで予定に入れると、予想額と記録の初期値に使う', () => {
+  const { sj, A, B } = fixture();
+  // 2026-11-17(火)は依頼元A の曜日パターン外 → 追加で出る日(見込みは基本額 5,000 + 作業項目Y 1,500)
+  S.setExtraDay(sj, 'A', '2026-11-17', { base: 5000, items: [{ name: '作業項目Y', amount: 1500 }] });
+  assert.equal(S.dayState(sj, '2026-11', A, '2026-11-17'), 'extra');
+  assert.equal(S.dayExpected(sj, A, '2026-11-17'), 6500);
+  assert.equal(S.dayExpected(sj, A, '2026-11-18'), S.dailyExpected(A)); // ふつうの予定日
+  const before = S.forecast(sj, '2026-11', 'A', TODAY);
+  assert.ok(S.plannedDates(sj, '2026-11', A).includes('2026-11-17'));
+  // 記録を作るときは、その日の見込みが最初から入る
+  const draft = S.newDraft(A, '2026-11-17', S.dayPlan(sj, 'A', '2026-11-17'));
+  assert.deepEqual([draft.base, draft.items.map((x) => x.name)], [5000, ['作業項目Y']]);
+  // 見込みを直すと予想額も変わる
+  S.setExtraDay(sj, 'A', '2026-11-17', { base: 0, items: [{ name: '作業項目Y', amount: 1500 }] });
+  assert.equal(S.forecast(sj, '2026-11', 'A', TODAY).planned, before.planned - 5000);
+  // 依頼元B の曜日パターンの日(土曜)を選んだときは、休む日を戻して見込みだけ入れる
+  S.toggleDay(sj, '2026-11', 'B', '2026-11-21');
+  assert.equal(S.dayState(sj, '2026-11', B, '2026-11-21'), 'off');
+  S.setExtraDay(sj, 'B', '2026-11-21', { base: 20000, items: [] });
+  assert.equal(S.dayState(sj, '2026-11', B, '2026-11-21'), 'planned');
+  assert.equal(S.dayExpected(sj, B, '2026-11-21'), 20000);
+  // やめると、日と見込みが消える
+  S.removeExtraDay(sj, 'A', '2026-11-17');
+  assert.equal(S.dayState(sj, '2026-11', A, '2026-11-17'), 'none');
+  assert.equal(S.dayPlan(sj, 'A', '2026-11-17'), null);
+  // 保存して読み直しても見込みは残る
+  const again = S.normalize(JSON.parse(JSON.stringify(sj)));
+  assert.equal(again.schedule['2026-11'].B.plans['2026-11-21'].base, 20000);
+});
+
+test('支払い管理への自動の反映:対応する入金予定を予想額にそろえ、入金済みの入金は変えない', () => {
+  const { d, sj, A } = fixture();
+  d.payments.month = '2026-12';
+  P.saveIncome(d.payments, { id: 'inc1', name: '副業:依頼元A', amount: null, fixed: false });
+  A.payment = { incomeId: 'inc1', timing: 'next', day: 25 }; // 翌月払い → 11 月の働いた分が 12 月の入金
+  S.saveRecord(sj, { ...S.newDraft(A, '2026-11-02'), confirmed: true });
+  const expected = S.forecast(sj, '2026-11', 'A', TODAY).total;
+  assert.equal(S.needsPaymentSync(d, TODAY), true);
+  assert.equal(S.syncPayments(d, TODAY), 1);
+  assert.equal(d.payments.incomes[0].amount, expected);
+  assert.equal(S.needsPaymentSync(d, TODAY), false);
+  assert.deepEqual(S.clientsForIncome(sj, 'inc1').map((c) => c.id), ['A']);
+  // 入金済みにしたら、そのあと記録が増えても変えない
+  d.payments.incomes[0].done = true;
+  S.saveRecord(sj, S.newDraft(A, '2026-11-04'));
+  assert.equal(S.syncPayments(d, TODAY), 0);
+  assert.equal(d.payments.incomes[0].amount, expected);
+});
+
+test('v5 のデータを開くと v6 になり、副業の予定は見込み(plans)つきの形になる', () => {
+  const v5 = store.createEmpty(NOW);
+  v5.sidejob.clients.push({ id: 'A', name: '依頼元A', baseAmount: 1000, tasks: [], weekdays: [1], payment: {}, memo: '' });
+  v5.sidejob.schedule = { '2026-11': { A: { off: ['2026-11-02'], extra: ['2026-11-04'] } } };
+  v5.schemaVersion = 5;
+  const res = store.prepare(JSON.parse(JSON.stringify(v5)));
+  assert.equal(res.ok, true);
+  assert.equal(res.data.schemaVersion, 6);
+  assert.deepEqual(res.data.sidejob.schedule['2026-11'].A, { off: ['2026-11-02'], extra: ['2026-11-04'], plans: {} });
 });

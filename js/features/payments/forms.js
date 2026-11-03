@@ -247,9 +247,12 @@
     const done = checkbox('済(入金済み)', draft.done);
     const memo = memoArea(draft.memo);
 
-    s.body.append(
+    const auto = src && MT.sidejobModel ? MT.sidejobModel.clientsForIncome(d.sidejob, src.id) : [];
+    add(
+      s.body,
+      auto.length ? h('p', { class: 'calc-preview', text: `この入金予定には、副業(${auto.map((c) => c.name).join('・')})の予想額が自動で入ります。入金済みにすると、そのあとは変わりません。` }) : null,
       field('項目名', nameInput),
-      field('金額', amount.el, '変動の入金は、月が変わると空欄に戻ります。'),
+      field('金額', amount.el, '変動の入金は、月が変わると空欄に戻ります。空欄のままだと赤で「未入力」と出ます。'),
       field('種類', kind.el),
       field('優先振込先', target, '振り分けでは、優先振込先のある入金から先に使います。'),
       done.el,

@@ -260,6 +260,16 @@
     );
   }
 
+  /** 価格が無い銘柄の、取れない理由(画面に出す) */
+  function missingReason(x) {
+    if (!x.code) return 'コードが未入力です(編集で入れてください)';
+    if (x.lastError) return x.lastError;
+    const sec = MT.secrets.get();
+    if (x.type === 'us' && !sec.finnhubKey) return 'Finnhub のキーが未設定です(ドルで手入力できます)';
+    if (x.type !== 'us' && !sec.priceUrl) return '価格取得のURLが未設定です(手入力できます)';
+    return 'まだ「価格を更新」していません';
+  }
+
   function holdingRow(a, x) {
     const v = A.valuation(x, a);
     const unit = F.qtyInfo(x.type).unit;
@@ -281,7 +291,8 @@
           h('span', { class: 'chip', text: A.label(A.ACCOUNTS, x.account) }),
           h('span', { class: 'chip', text: A.label(A.TYPES, x.type) }),
           h('span', { text: `${U.formatNumber(x.quantity, 6)}${unit} × ${priceText}` }),
-          x.lastError && !v.missing ? h('span', { class: 'meta-due is-warn', text: `取得失敗(前回 ${dateTime(x.priceAt)} の価格)` }) : null,
+          x.lastError && !v.missing ? h('span', { class: 'meta-due is-warn', text: `取得失敗:${x.lastError}(前回 ${dateTime(x.priceAt)} の価格)` }) : null,
+          v.missing ? h('span', { class: 'meta-due is-warn', text: `取れない理由:${missingReason(x)}` }) : null,
           x.priceSource === 'manual' && !v.missing ? h('span', { text: '手入力の価格' }) : null,
           x.priceSource === 'import' && !v.missing ? h('span', { text: '旧アプリの価格' }) : null,
           h('span', { class: 'chip chip-soft', text: A.label(A.PRIORITIES, x.sellPriority) })

@@ -348,3 +348,22 @@ test('サンプル:読み込むと月替わりが動き、先月分が履歴に�
   assert.equal(sumCategories(t, 'total'), t.total);
   assert.equal(P.endedBills(d.payments, YM).length, 1); // ジムは先月で終了
 });
+
+test('未入力:請求額も内訳も空欄の支払いだけを「完全に未入力」とし、一部だけ入れた所は空欄を 0 として計算する', () => {
+  const { d, p, a } = fixture();
+  P.saveBill(p, { id: 'none', name: '架空カードN', amount: null, dueDay: 10, accountId: a, category: 'variable', subItems: [] });
+  P.saveBill(p, { id: 'part', name: '架空カードP', amount: null, dueDay: 10, accountId: a, category: 'variable', subItems: [{ name: '入れた内訳', amount: 3000, category: 'fixed' }, { name: '空欄の内訳', amount: null, category: 'variable' }] });
+  P.saveBill(p, { id: 'subs', name: '架空カードS', amount: null, dueDay: 10, accountId: a, category: 'variable', subItems: [{ name: '空欄', amount: null, category: 'fixed' }] });
+  const bill = (id) => p.bills.find((b) => b.id === id);
+  assert.equal(P.isUnentered(bill('none'), YM), true);
+  assert.equal(P.isUnentered(bill('subs'), YM), true);
+  assert.equal(P.isUnentered(bill('part'), YM), false);
+  assert.equal(P.billTotal(bill('part'), YM), 3000); // 空欄の内訳は 0
+  const w = P.warnings(d, YM);
+  assert.deepEqual(w.missingAmount.map((b) => b.id).sort(), ['none', 'subs']);
+  // 完全に未入力の支払いは、合計では 0 として扱う
+  const t = P.totals(p, YM);
+  assert.equal(t.byCategory.fixed.total >= 3000, true);
+  P.toggleDone(p, 'bills', 'none');
+  assert.deepEqual(P.warnings(d, YM).missingAmount.map((b) => b.id), ['subs']); // 済にしたものは出さない
+});

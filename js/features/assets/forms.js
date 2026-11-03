@@ -499,19 +499,28 @@
 
   function openPriceReport(report) {
     const a = assets();
-    const c = MT.assetPrices.countReport(report);
-    const nameOf = (code) => {
-      const x = a.holdings.find((v) => A.normCode(v.code) === code);
-      return x ? `${x.name}(${code})` : code;
-    };
+    // 銘柄ごとに結果を見る(証券会社ごとにまとめる)
+    let ok = 0;
+    const failed = new Map();
+    for (const x of a.holdings) {
+      const r = report.prices[A.priceKey(x)];
+      if (!r) continue;
+      if (r.ok) {
+        ok++;
+        continue;
+      }
+      if (!failed.has(x.broker)) failed.set(x.broker, []);
+      failed.get(x.broker).push(`${x.name}${x.code ? `(${x.code})` : ''}・${A.label(A.TYPES, x.type)}:${r.reason}`);
+    }
+    const failedCount = [...failed.values()].reduce((t, l) => t + l.length, 0);
     const s = openSheet({ title: report.aborted ? '価格を更新できませんでした' : '価格を更新しました', className: 'sheet-form' });
     add(
       s.body,
-      report.aborted ? h('p', { class: 'field-error', text: report.aborted }) : h('p', { class: 'sheet-text', text: `取得できた銘柄:${c.ok}件・取得できなかった銘柄:${c.failed.length}件` }),
-      c.failed.length
+      report.aborted ? h('p', { class: 'field-error', text: report.aborted }) : h('p', { class: 'sheet-text', text: `取得できた銘柄:${ok}件・取得できなかった銘柄:${failedCount}件` }),
+      failedCount
         ? [
-            h('h3', { class: 'form-section-title', text: '取得できなかった銘柄(前回の価格のまま。一度も取れていなければ「価格未取得」)' }),
-            h('ul', { class: 'report-list is-issue' }, c.failed.map((f) => h('li', { text: `${nameOf(f.code)}:${f.reason}` }))),
+            h('h3', { class: 'form-section-title', text: '取得できなかった銘柄と理由(前回の価格のまま。一度も取れていなければ「価格未取得」)' }),
+            [...failed.entries()].map(([broker, lines]) => [h('p', { class: 'form-label', text: broker }), h('ul', { class: 'report-list is-issue' }, lines.map((t) => h('li', { text: t })))]),
           ]
         : null,
       report.messages.length ? [h('h3', { class: 'form-section-title', text: 'お知らせ' }), h('ul', { class: 'report-list' }, report.messages.map((m) => h('li', { text: m })))] : null,

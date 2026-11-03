@@ -380,7 +380,7 @@ test('v4 のデータを開くと v5 になり、項目に参考行の印(false)
   const res = store.prepare(clone(v4));
   assert.equal(res.ok, true);
   assert.equal(res.migrated, true);
-  assert.equal(res.data.schemaVersion, 5);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
   assert.equal(res.data.monthly.items[0].reference, false);
   assert.equal(M.monthTotal(res.data.monthly, '2026-10'), 5000);
   assert.deepEqual(res.data.imports, { log: [], undo: null });
@@ -427,7 +427,7 @@ test('資産の反映:証券会社×種別(国内株 / 米国株 / 投資信託)
 
 test('サンプル:v5 の形で、取り込みの履歴は空', () => {
   const d = store.prepare(sample.build(NOW)).data;
-  assert.equal(d.schemaVersion, 5);
+  assert.equal(d.schemaVersion, store.SCHEMA_VERSION);
   assert.deepEqual(d.imports, { log: [], undo: null });
   assert.ok(d.monthly.items.every((x) => x.reference === false));
 });

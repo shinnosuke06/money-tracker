@@ -250,7 +250,7 @@
         h('h2', { class: 'card-title', text: '予想額' }),
         h('div', { class: 'cal-switch' }, clientFilter(data)),
         h('div', { class: 'stat-grid' }, forecastCard(data, cur, '今月'), forecastCard(data, U.ymAdd(cur, 1), '来月')),
-        h('p', { class: 'hint', text: '予定 = 入金がまだ確認できていない記録 + 今日以降の予定日(基本額 + 既定の作業項目)。予定は薄い色で表示しています。' })
+        h('p', { class: 'hint', text: '予定 = 入金がまだ確認できていない記録 + 今日以降の予定日(基本額 + 既定の作業項目。追加で出る日は、選んだ基本額と作業項目)。予定は薄い色で表示しています。' })
       )
     );
 
@@ -268,6 +268,7 @@
       const date = `${ym}-${String(d).padStart(2, '0')}`;
       const st = S.dayState(data, ym, client, date);
       const done = recorded.has(date);
+      const plan = st === 'off' ? null : S.dayPlan(data, cid, date);
       const stateLabel = { planned: '予定', off: '休む', extra: '追加で出る', none: '予定なし' }[st];
       cells.push(
         h(
@@ -275,10 +276,12 @@
           {
             type: 'button',
             class: `cal-cell is-${st}${done ? ' is-done' : ''}${date === today ? ' is-today' : ''}`,
-            'aria-label': `${U.dayLabel(date)} ${stateLabel}${done ? '・記録あり' : ''}`,
-            onClick: () => store.update((dd) => S.toggleDay(dd.sidejob, ym, cid, date)),
+            'aria-label': `${U.dayLabel(date)} ${stateLabel}${plan ? `・見込み ${U.man(S.recordTotal(plan))}` : ''}${done ? '・記録あり' : ''}`,
+            // 予定の日 ↔ 休む。予定のない日・追加の日は、依頼元と金額を選ぶ画面を開く
+            onClick: () => (st === 'none' || st === 'extra' ? F.openExtraDaySheet(date, cid) : store.update((dd) => S.toggleDay(dd.sidejob, ym, cid, date))),
           },
           h('span', { class: 'cal-day', text: String(d) }),
+          plan ? h('span', { class: 'cal-amt', text: U.man(S.recordTotal(plan)) }) : null,
           done ? h('span', { class: 'cal-mark', text: '●' }) : null
         )
       );
@@ -301,14 +304,14 @@
           h('span', { class: 'lg lg-extra', text: '追加で出る' }),
           h('span', { text: '● 記録あり' })
         ),
-        h('p', { class: 'hint', text: '日をタップすると、予定の日は「休む」に、予定のない日は「追加で出る」になります。' })
+        h('p', { class: 'hint', text: '予定の日をタップすると「休む」になります。予定のない日をタップすると、依頼元と基本額・作業項目を選んで「追加で出る」日にできます(もう一度タップで直す・やめる)。' })
       ),
       h(
         'section',
         { class: 'card' },
         h('h2', { class: 'card-title', text: '支払い管理への連携' }),
-        h('p', { class: 'hint', text: '依頼元ごとに対応させた入金予定へ、働いた月の予想額(確認済み + 予定)を入れます。対応と入金のタイミングは「依頼元」で設定します。' }),
-        h('div', { class: 'button-row' }, btn('支払い管理の入金予定に入れる', { icon: 'sync', onClick: F.openPaymentLinkSheet }))
+        h('p', { class: 'hint', text: '依頼元ごとに対応させた入金予定へ、働いた月の予想額(確認済み + 予定)が自動で入ります(翌月払いなら、前の月に働いた分)。入金済みにした入金は変えません。対応と入金のタイミングは「依頼元」で設定します。' }),
+        h('div', { class: 'button-row' }, btn('入る額を見る', { icon: 'sync', onClick: F.openPaymentLinkSheet }))
       )
     );
   }
@@ -422,6 +425,16 @@
       )
     );
   }
+
+  // 支払い管理への自動の反映:起動時・画面に戻ったとき・データが変わったときに、対応する入金予定を予想額にそろえる
+  MT.maintenance = MT.maintenance || [];
+  MT.maintenance.push(() => {
+    const d = store.get();
+    const today = U.todayStr();
+    if (!S.needsPaymentSync(d, today)) return null;
+    store.update((dd) => S.syncPayments(dd, today));
+    return null;
+  });
 
   MT.views = MT.views || {};
   MT.views.sidejob = { render: renderRecords, unmount: unmountRecords };

@@ -6,6 +6,8 @@
  *  - 米国株:Finnhub の quote の c(ドル)。円は USD/JPY を掛けて出す(キーが無ければ手入力)
  *  - USD/JPY:上の URL に為替のコード(既定 USDJPY)も一緒に問い合わせる。取れなければ設定の手入力値
  * 送るのは銘柄コードだけ(数量や金額は送らない)。URL とキーは MT.secrets から読む。
+ * 取りに行って取れなかった銘柄と、コードが無い銘柄には理由を付ける(URL・キーが未設定のときは、お知らせだけ)。
+ * 価格が取れるかは種別とコードで決まり、証券会社の違いは関係しない。
  */
 (function (root) {
   'use strict';
@@ -76,6 +78,16 @@
     const us = uniq(assets.holdings.filter((h) => h.type === 'us').map((h) => A.normCode(h.code)));
     const s = assets.settings;
     const fxCode = A.normCode(s.fxCode || 'USDJPY');
+    const NETWORK = '通信できませんでした';
+    const networkHint = (label) =>
+      report.messages.push(`${label}:${NETWORK}。インターネットにつながっていないか、外部に接続できない画面(claude.ai の試用ページなど)で開いています。その場合は価格を手入力してください`);
+
+    // コードが無い銘柄は取りに行けない
+    const noCode = assets.holdings.filter((h) => !A.normCode(h.code));
+    const NO_CODE = 'コードが未入力です(銘柄の編集でコードを入れてください)';
+    if (noCode.some((h) => h.type !== 'us')) set('jp', '', false, NO_CODE);
+    if (noCode.some((h) => h.type === 'us')) set('us', '', false, NO_CODE);
+    if (noCode.length) report.messages.push(`コードが未入力の銘柄が ${noCode.length}件あります(${noCode.slice(0, 3).map((h) => h.name).join('、')}${noCode.length > 3 ? ' など' : ''})`);
 
     // 国内株・投資信託(と USD/JPY)
     let gas = null;
@@ -98,11 +110,12 @@
         gas = json;
       } catch (e) {
         const why = errorText(e);
-        report.messages.push(`国内株・投資信託:${why}`);
+        if (why === NETWORK) networkHint('国内株・投資信託');
+        else report.messages.push(`国内株・投資信託:${why}`);
         for (const c of jp) set('jp', c, false, why);
       }
     } else if (jp.length) {
-      report.messages.push('国内株・投資信託:価格取得のURLが未設定です(価格は銘柄の編集で手入力できます)');
+      report.messages.push('国内株・投資信託:価格取得のURLが未設定です。設定の「価格の自動取得」で入れてください(URL とキーは、開いている画面ごとに保存されます。価格は銘柄の編集で手入力もできます)');
     }
 
     if (gas) {
@@ -134,17 +147,21 @@
       if (!secrets.finnhubKey) {
         report.messages.push('米国株:Finnhub の APIキーが未設定です(株価はドルで手入力できます)');
       } else {
+        let offline = false;
         await pool(us, 3, async (c) => {
           const url = `${FINNHUB_QUOTE}?symbol=${encodeURIComponent(c)}&token=${encodeURIComponent(secrets.finnhubKey)}`;
           try {
             const j = await getJson(url, doFetch, timeoutMs);
             const v = toNum(j && j.c);
             if (v > 0) set('us', c, true, v);
-            else set('us', c, false, '銘柄が見つからないか、価格がありません');
+            else set('us', c, false, '銘柄が見つからないか、価格がありません(コードを確かめてください)');
           } catch (e) {
-            set('us', c, false, errorText(e));
+            const why = errorText(e);
+            if (why === NETWORK) offline = true;
+            set('us', c, false, why);
           }
         });
+        if (offline) networkHint('米国株');
       }
     }
     return report;

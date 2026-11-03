@@ -1,6 +1,7 @@
 /*
  * 副業収入:入力ダイアログ
- *  日ごとの記録、依頼元の設定(作業項目・曜日パターン・支払い管理との対応)、支払い管理への連携
+ *  日ごとの記録、追加で出る日(依頼元・基本額・作業項目)、依頼元の設定(作業項目・曜日パターン・支払い管理との対応)、
+ *  支払い管理への連携(自動で入る内容の確認)
  */
 (function (root) {
   'use strict';
@@ -31,7 +32,9 @@
     }
     const src = rid ? data.records.find((r) => r.id === rid) : null;
     const firstClient = S.findClient(data, preset.clientId) || data.clients[0];
-    let draft = src ? JSON.parse(JSON.stringify(src)) : S.newDraft(firstClient, preset.date || U.todayStr());
+    const firstDate = preset.date || U.todayStr();
+    // 追加で出る日に見込み(基本額・作業項目)を入れてあれば、それを最初から選ぶ
+    let draft = src ? JSON.parse(JSON.stringify(src)) : S.newDraft(firstClient, firstDate, S.dayPlan(data, firstClient.id, firstDate));
     const s = openSheet({ title: src ? '記録を直す' : '記録を追加', className: 'sheet-form' });
     const err = errorLine();
     const date = dateInput(draft.date);
@@ -83,7 +86,7 @@
     clientSel.addEventListener('change', () => {
       // 依頼元を変えたら、その依頼元の基本額と既定の作業項目にし直す
       const c = S.findClient(sj(), clientSel.value);
-      draft = { ...draft, ...S.newDraft(c, date.value), id: draft.id, memo: memo.value, confirmed: confirmed.input.checked, content: '' };
+      draft = { ...draft, ...S.newDraft(c, date.value, c ? S.dayPlan(sj(), c.id, date.value) : null), id: draft.id, memo: memo.value, confirmed: confirmed.input.checked, content: '' };
       base.setValue(draft.base);
       buildTasks();
     });
@@ -181,7 +184,15 @@
     draft.tasks.forEach(addTaskRow);
     const weekdays = multiChips(U.WEEKDAYS.map((w, i) => ({ value: i, label: w })), draft.weekdays, { label: '曜日パターン' });
     const incomes = d.payments ? d.payments.incomes : [];
-    const income = selectEl([{ value: '', label: '連携しない' }].concat(incomes.map((i) => ({ value: i.id, label: i.name }))), draft.payment.incomeId || '', { 'aria-label': '対応する入金予定' });
+    const NEW_INCOME = '__new__';
+    const income = selectEl(
+      [
+        { value: '', label: '連携しない' },
+        { value: NEW_INCOME, label: '新しい入金予定を作る(「副業:依頼元の名前」)' },
+      ].concat(incomes.map((i) => ({ value: i.id, label: i.name }))),
+      draft.payment.incomeId || '',
+      { 'aria-label': '対応する入金予定' }
+    );
     const timing = segmented(
       [
         { value: 'next', label: '働いた月の翌月' },
@@ -209,7 +220,7 @@
         'section',
         { class: 'form-section' },
         h('h3', { class: 'form-section-title', text: '支払い管理との連携' }),
-        field('対応する入金予定', income, incomes.length ? '' : '支払い管理に入金予定がまだありません。'),
+        field('対応する入金予定', income, '選んだ入金予定には、働いた月の予想額(確認済み + 予定)が自動で入ります。入金済みにした入金は変えません。'),
         field('入金のタイミング', timing.el),
         field('入金日', day)
       ),
@@ -237,11 +248,17 @@
         baseAmount: b.value || 0,
         tasks,
         weekdays: weekdays.value(),
-        payment: { incomeId: income.value || null, timing: timing.value(), day: day.value ? Number(day.value) : null },
+        payment: { incomeId: income.value && income.value !== NEW_INCOME ? income.value : null, timing: timing.value(), day: day.value ? Number(day.value) : null },
         memo: memo.value,
       };
       let ok = false;
-      store.update((dd) => (ok = !!S.saveClient(dd.sidejob, c)));
+      store.update((dd) => {
+        if (income.value === NEW_INCOME && dd.payments) {
+          // 支払い管理に、この依頼元の入金予定(変動)を作ってつなぐ
+          c.payment.incomeId = MT.paymentsModel.saveIncome(dd.payments, { id: U.uid('inc'), name: `副業:${n}`, amount: null, fixed: false, targetId: null, done: false, memo: '' });
+        }
+        ok = !!S.saveClient(dd.sidejob, c);
+      });
       if (!ok) return err.show(`依頼元は ${S.MAX_CLIENTS}件までです`);
       s.close();
       toast(src ? '保存しました' : '依頼元を追加しました');
@@ -265,63 +282,152 @@
   }
 
   // ---------------------------------------------------------------
-  // 支払い管理への連携
+  // 支払い管理への連携(自動で入る内容の確認)
   // ---------------------------------------------------------------
 
   function openPaymentLinkSheet() {
     const d = store.get();
     const plan = S.paymentPlan(d, U.todayStr());
     const s = openSheet({
-      title: '支払い管理の入金予定に入れる',
-      description: `支払い管理で管理中の ${U.ymLabel(plan.target)} の入金予定に、働いた月の予想額(確認済み + 予定)を入れます。`,
+      title: '支払い管理の入金予定に入る額',
+      description: `支払い管理で管理中の ${U.ymLabel(plan.target)} の入金予定に、働いた月の予想額(確認済み + 予定)が自動で入ります。入金済みにした入金は変えません。`,
       className: 'sheet-form',
     });
     if (!plan.rows.length) {
-      s.body.append(h('p', { class: 'sheet-text', text: '入金予定と対応している依頼元がありません。「依頼元」の編集で「対応する入金予定」を選んでください。' }));
-      s.foot.append(btn('閉じる', { onClick: () => s.close() }));
-      return;
-    }
-    add(
-      s.body,
-      plan.rows.map((r) =>
-        h(
-          'div',
-          { class: 'link-block' },
-          h(
+      s.body.append(h('p', { class: 'sheet-text', text: '入金予定と対応している依頼元がありません。「依頼元」の編集で「対応する入金予定」を選ぶか、新しく作ってください。' }));
+    } else {
+      add(
+        s.body,
+        plan.rows.map((r) => {
+          const inc = d.payments.incomes.find((i) => i.id === r.incomeId);
+          return h(
             'div',
-            { class: 'reflect-row' },
-            h('span', { class: 'reflect-name', text: r.incomeName }),
-            h('span', { class: 'reflect-from', text: r.from === null ? '未入力' : U.yen(r.from) }),
-            h('span', { class: 'reflect-arrow', 'aria-hidden': 'true', text: '→' }),
-            h('span', { class: 'reflect-to', text: U.yen(r.to) })
-          ),
-          h(
-            'ul',
-            { class: 'report-list' },
-            r.sources.map((x) =>
-              h('li', { text: `${x.clientName}:${U.ymLabel(x.workMonth)}分 ${U.man(x.amount)}(${x.timing === 'same' ? '当月' : '翌月'}${x.day ? `${x.day}日` : ''}入金)` })
+            { class: 'link-block' },
+            h(
+              'div',
+              { class: 'reflect-row' },
+              h('span', { class: 'reflect-name', text: r.incomeName }),
+              h('span', { class: 'reflect-from', text: inc && inc.done ? '入金済み' : '自動' }),
+              h('span', { class: 'reflect-arrow', 'aria-hidden': 'true', text: '→' }),
+              h('span', { class: 'reflect-to', text: U.yen(inc && inc.done ? inc.amount || 0 : r.to) })
+            ),
+            h(
+              'ul',
+              { class: 'report-list' },
+              r.sources.map((x) =>
+                h('li', { text: `${x.clientName}:${U.ymLabel(x.workMonth)}分 ${U.man(x.amount)}(${x.timing === 'same' ? '当月' : '翌月'}${x.day ? `${x.day}日` : ''}入金)` })
+              )
             )
-          )
-        )
-      ),
-      h('p', { class: 'form-hint', text: '今の金額は上書きされます。' })
-    );
-    formFoot(s, {
-      saveLabel: '上書きして入れる',
-      onSave: async () => {
-        const ok = await confirmDialog({
-          title: '入金予定の金額を上書きしますか?',
-          message: plan.rows.map((r) => `${r.incomeName}:${r.from === null ? '未入力' : U.yen(r.from) + '円'} → ${U.yen(r.to)}円`),
-          okLabel: '上書きする',
-        });
-        if (!ok) return;
-        if (store.update((dd) => S.applyPaymentPlan(dd, U.todayStr()), { backup: '副業の予想額を入金予定へ' })) {
-          s.close();
-          toast('入金予定に入れました');
-        }
-      },
-    });
+          );
+        })
+      );
+    }
+    s.foot.append(btn('閉じる', { variant: 'primary', onClick: () => s.close() }));
   }
 
-  MT.sidejobUI = { openRecordSheet, deleteRecordConfirm, openClientSheet, openPaymentLinkSheet };
+  // ---------------------------------------------------------------
+  // 追加で出る日(依頼元・基本額・作業項目を選んで予定に入れる)
+  // ---------------------------------------------------------------
+
+  /**
+   * @param {string} date 日付
+   * @param {string} clientId カレンダーで見ている依頼元(最初に選ぶ依頼元)
+   */
+  function openExtraDaySheet(date, clientId) {
+    const data = sj();
+    const ym = date.slice(0, 7);
+    const start = S.findClient(data, clientId) || data.clients[0];
+    if (!start) return;
+    const editing = S.dayState(data, ym, start, date) === 'extra' || !!S.dayPlan(data, start.id, date);
+    const s = openSheet({
+      title: `${U.dayLabel(date)} に出る`,
+      description: 'どの依頼元の仕事かと、基本額・作業項目を選ぶと、予定と予想額(支払い管理の入金予定)に入ります。',
+      className: 'sheet-form',
+    });
+    const err = errorLine();
+    const clientSel = selectEl(data.clients.map((c) => ({ value: c.id, label: c.name })), start.id, { 'aria-label': '依頼元' });
+    const base = amountField({ label: '基本額', compact: true, onChange: updateTotal });
+    const taskBox = h('div', { class: 'task-list' });
+    const totalEl = h('p', { class: 'record-total', 'aria-live': 'polite' });
+    const note = h('p', { class: 'form-hint' });
+    let rows = [];
+
+    function load() {
+      const c = S.findClient(sj(), clientSel.value);
+      const plan = S.dayPlan(sj(), c.id, date);
+      const draft = S.newDraft(c, date, plan);
+      base.setValue(draft.base);
+      const chosen = new Map(draft.items.map((x) => [x.name, x.amount]));
+      const list = c.tasks
+        .map((t) => ({ name: t.name, amount: chosen.has(t.name) ? chosen.get(t.name) : t.amount, on: chosen.has(t.name) }))
+        .concat(draft.items.filter((x) => !c.tasks.some((t) => t.name === x.name)).map((x) => ({ name: x.name, amount: x.amount, on: true })));
+      taskBox.replaceChildren();
+      rows = list.map((t) => {
+        const check = h('input', { type: 'checkbox', checked: t.on, 'aria-label': `${t.name}を選ぶ` });
+        const amount = amountField({ value: t.amount, label: `${t.name}の金額`, compact: true, onChange: updateTotal });
+        check.addEventListener('change', updateTotal);
+        taskBox.append(h('div', { class: 'task-row' }, h('label', { class: 'task-name' }, check, h('span', { text: t.name })), amount.el));
+        return { name: t.name, check, amount };
+      });
+      if (!rows.length) taskBox.append(h('p', { class: 'form-hint', text: 'この依頼元には作業項目がありません(「依頼元」で登録できます)。' }));
+      note.textContent = c.weekdays.includes(U.weekday(date))
+        ? `${c.name}はこの曜日がもともと予定の日です。休む日になっていれば予定に戻し、この見込みにします。`
+        : '';
+      updateTotal();
+    }
+
+    function selectedItems() {
+      return rows.filter((r) => r.check.checked).map((r) => ({ name: r.name, amount: r.amount.result().ok ? r.amount.result().value || 0 : 0 }));
+    }
+
+    function updateTotal() {
+      if (!rows) return;
+      const b = base.result();
+      const items = selectedItems();
+      const total = (b.ok ? b.value || 0 : 0) + items.reduce((t, x) => t + x.amount, 0);
+      totalEl.textContent = `見込み ${manYen(total)}${items.length ? `・内容:${S.contentOf(items)}` : ''}`;
+    }
+
+    clientSel.addEventListener('change', load);
+    s.body.append(
+      field('依頼元', clientSel),
+      field('基本額', base.el, '金額だけで入れるときは、基本額に入れて作業項目のチェックを外します。'),
+      h('div', { class: 'form-row' }, h('span', { class: 'form-label', text: '作業項目(オンオフと金額を変えられます)' }), taskBox),
+      totalEl,
+      note,
+      err.el
+    );
+    load();
+
+    function save() {
+      err.hide();
+      const b = base.result();
+      if (!b.ok || (b.value !== null && b.value < 0)) return err.show('基本額を確かめてください', base.input);
+      for (const r of rows) {
+        const a = r.amount.result();
+        if (r.check.checked && (!a.ok || (a.value !== null && a.value < 0))) return err.show(`「${r.name}」の金額を確かめてください`, r.amount.input);
+      }
+      const cid = clientSel.value;
+      const plan = { base: b.value || 0, items: selectedItems() };
+      const ok = store.update((dd) => {
+        if (editing && cid !== start.id) S.removeExtraDay(dd.sidejob, start.id, date);
+        S.setExtraDay(dd.sidejob, cid, date, plan);
+      });
+      if (ok) {
+        s.close();
+        toast(`${U.dayLabel(date)} を ${S.clientName(sj(), cid)} の予定に入れました(見込み ${U.man(S.recordTotal(plan))})`);
+      }
+    }
+    async function remove() {
+      const ok = await confirmDialog({ title: `${U.dayLabel(date)} の追加をやめますか?`, message: ['この日の見込みも消えます。'], okLabel: 'やめる', danger: true });
+      if (!ok) return;
+      if (store.update((dd) => S.removeExtraDay(dd.sidejob, start.id, date))) {
+        s.close();
+        toast('追加で出る日をやめました');
+      }
+    }
+    formFoot(s, { onSave: save, onDelete: editing ? remove : null, saveLabel: '予定に入れる' });
+  }
+
+  MT.sidejobUI = { openRecordSheet, deleteRecordConfirm, openClientSheet, openPaymentLinkSheet, openExtraDaySheet };
 })(window);

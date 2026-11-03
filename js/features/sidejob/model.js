@@ -13,13 +13,18 @@
  *     id, date, clientId,
  *     base,                            // 基本額(円)
  *     items: [{ name, amount }],       // 選んだ作業項目(金額は記録ごとに変えられる)
- *     content,                         // 内容の文章(選んだ項目から自動で作る。旧データは文章のまま)
+ *     content,                         // 内容の文章。選んだ項目から自動で作る(「作業項目X1、作業項目Y0.1」=
+ *                                      //   項目名 + 金額を万円にした数)。旧データは文章のまま
  *     memo, confirmed                  // 入金確認
  *   }],
- *   schedule: { "YYYY-MM": { [clientId]: { off: [日付], extra: [日付] } } }   // 休む日・追加で出る日
+ *   schedule: { "YYYY-MM": { [clientId]: {
+ *     off: [日付], extra: [日付],      // 休む日・追加で出る日
+ *     plans: { [日付]: { base, items: [{ name, amount }] } }   // その日の見込み(追加で出る日に選んだ基本額と作業項目)
+ *   } } }
  * }
  *
  * 金額はすべて円の整数で保存・計算し、画面で万円(小数 1 桁)に直す。
+ * 支払い管理との連携:依頼元に対応させた入金予定へ、働いた月の予想額を自動で入れる(syncPayments)。
  */
 (function (root) {
   'use strict';
@@ -62,6 +67,11 @@
     };
   }
 
+  function cleanPlan(pl) {
+    const x = pl && typeof pl === 'object' ? pl : {};
+    return { base: yen(x.base), items: list(x.items).map((it) => ({ name: text(it.name) || '作業', amount: yen(it.amount) })) };
+  }
+
   function cleanRecord(r) {
     return {
       id: id(r.id, 'rec'),
@@ -87,6 +97,7 @@
     for (const r of list(raw.records)) {
       if (!U.isDateStr(r.date)) continue;
       const rec = cleanRecord(r);
+      if (rec.items.length) rec.content = contentOf(rec.items); // 作業項目から作る文章は、いつも今の書き方にそろえる
       if (recIds.has(rec.id)) continue;
       recIds.add(rec.id);
       sj.records.push(rec);
@@ -99,8 +110,12 @@
         const inMonth = (arr) => [...new Set((Array.isArray(arr) ? arr : []).filter((x) => U.isDateStr(x) && x.startsWith(ym)))].sort();
         const off = inMonth(e.off);
         const extra = inMonth(e.extra);
-        if (!off.length && !extra.length) continue;
-        (sj.schedule[ym] = sj.schedule[ym] || {})[cid] = { off, extra };
+        const plans = {};
+        if (e.plans && typeof e.plans === 'object') {
+          for (const date of Object.keys(e.plans)) if (U.isDateStr(date) && date.startsWith(ym) && !off.includes(date)) plans[date] = cleanPlan(e.plans[date]);
+        }
+        if (!off.length && !extra.length && !Object.keys(plans).length) continue;
+        (sj.schedule[ym] = sj.schedule[ym] || {})[cid] = { off, extra, plans };
       }
     }
     return sj;
@@ -132,9 +147,14 @@
     return r.base + r.items.reduce((t, x) => t + x.amount, 0);
   }
 
-  /** 内容の文章(選んだ項目を「、」でつなぐ) */
+  /** 金額を万円の数にする(10,000 → "1"、1,000 → "0.1"、12,500 → "1.25") */
+  function manNumber(n) {
+    return String(Math.round((Number(n) || 0)) / 10000);
+  }
+
+  /** 内容の文章:選んだ項目を「項目名 + 万円の数」にして「、」でつなぐ(関スー 10,000円 → 「関スー1」) */
   function contentOf(items) {
-    return items.map((x) => x.name).join('、');
+    return items.map((x) => `${x.name}${manNumber(x.amount)}`).join('、');
   }
 
   /** 1 日あたりの見込み額 = 基本額 + 既定の作業項目 */
@@ -142,14 +162,21 @@
     return client.baseAmount + client.tasks.filter((t) => t.isDefault).reduce((s, t) => s + t.amount, 0);
   }
 
-  /** 新しい記録の下書き(基本額と既定の作業項目を最初から選ぶ) */
-  function newDraft(client, date) {
+  /**
+   * 新しい記録の下書き(基本額と既定の作業項目を最初から選ぶ)。
+   * plan(追加で出る日の見込み)があれば、その基本額と作業項目にする。
+   */
+  function newDraft(client, date, plan = null) {
     return {
       id: null,
       date,
       clientId: client ? client.id : '',
-      base: client ? client.baseAmount : 0,
-      items: client ? client.tasks.filter((t) => t.isDefault).map((t) => ({ name: t.name, amount: t.amount })) : [],
+      base: plan ? plan.base : client ? client.baseAmount : 0,
+      items: plan
+        ? plan.items.map((x) => ({ name: x.name, amount: x.amount }))
+        : client
+          ? client.tasks.filter((t) => t.isDefault).map((t) => ({ name: t.name, amount: t.amount }))
+          : [],
       content: '',
       memo: '',
       confirmed: false,
@@ -177,9 +204,23 @@
     return { total, confirmed, unconfirmed: total - confirmed, byClient, count: rows.length };
   }
 
+  const emptyEntry = () => ({ off: [], extra: [], plans: {} });
+
+  /** その日の見込み(追加で出る日に選んだ基本額と作業項目)。無ければ null */
+  function dayPlan(sj, clientId, date) {
+    const e = (sj.schedule[String(date).slice(0, 7)] || {})[clientId];
+    return e && e.plans && e.plans[date] ? e.plans[date] : null;
+  }
+
+  /** その日の見込み額:追加で出る日の見込みがあればそれ、無ければ 1 日あたりの見込み額 */
+  function dayExpected(sj, client, date) {
+    const pl = dayPlan(sj, client.id, date);
+    return pl ? recordTotal(pl) : dailyExpected(client);
+  }
+
   /** 曜日パターンから作ったその月の予定日(休む日を除き、追加の日を足す) */
   function plannedDates(sj, ym, client) {
-    const e = (sj.schedule[ym] || {})[client.id] || { off: [], extra: [] };
+    const e = (sj.schedule[ym] || {})[client.id] || emptyEntry();
     const out = new Set();
     const n = U.daysInMonth(ym);
     for (let d = 1; d <= n; d++) {
@@ -192,23 +233,67 @@
 
   /** カレンダーの日の状態:planned(予定)/ off(休む)/ extra(追加)/ none */
   function dayState(sj, ym, client, date) {
-    const e = (sj.schedule[ym] || {})[client.id] || { off: [], extra: [] };
+    const e = (sj.schedule[ym] || {})[client.id] || emptyEntry();
     if (e.extra.includes(date)) return 'extra';
     if (client.weekdays.includes(U.weekday(date))) return e.off.includes(date) ? 'off' : 'planned';
     return 'none';
   }
 
-  /** 日をタップ:予定 ↔ 休む、予定外 ↔ 追加 */
+  function entryOf(sj, ym, clientId) {
+    const month = (sj.schedule[ym] = sj.schedule[ym] || {});
+    const e = (month[clientId] = month[clientId] || emptyEntry());
+    if (!e.plans) e.plans = {};
+    return e;
+  }
+
+  function tidySchedule(sj, ym, clientId) {
+    const month = sj.schedule[ym];
+    if (!month) return;
+    const e = month[clientId];
+    if (e && !e.off.length && !e.extra.length && !Object.keys(e.plans || {}).length) delete month[clientId];
+    if (!Object.keys(month).length) delete sj.schedule[ym];
+  }
+
+  /** 日をタップ:予定 ↔ 休む、予定外 ↔ 追加(追加をやめると、その日の見込みも消す) */
   function toggleDay(sj, ym, clientId, date) {
     const client = findClient(sj, clientId);
     if (!client || !date.startsWith(ym)) return;
-    const month = (sj.schedule[ym] = sj.schedule[ym] || {});
-    const e = (month[clientId] = month[clientId] || { off: [], extra: [] });
+    const e = entryOf(sj, ym, clientId);
     const flip = (arr, v) => (arr.includes(v) ? arr.filter((x) => x !== v) : arr.concat(v).sort());
-    if (client.weekdays.includes(U.weekday(date))) e.off = flip(e.off, date);
-    else e.extra = flip(e.extra, date);
-    if (!e.off.length && !e.extra.length) delete month[clientId];
-    if (!Object.keys(month).length) delete sj.schedule[ym];
+    if (client.weekdays.includes(U.weekday(date))) {
+      e.off = flip(e.off, date);
+      if (e.off.includes(date)) delete e.plans[date];
+    } else {
+      e.extra = flip(e.extra, date);
+      if (!e.extra.includes(date)) delete e.plans[date];
+    }
+    tidySchedule(sj, ym, clientId);
+  }
+
+  /**
+   * 追加で出る日を、依頼元と見込み(基本額と作業項目)つきで入れる。
+   * 依頼元の曜日パターンの日なら、休む日から外して、その日の見込みだけ入れる。
+   */
+  function setExtraDay(sj, clientId, date, plan) {
+    const client = findClient(sj, clientId);
+    if (!client || !U.isDateStr(date)) return false;
+    const ym = date.slice(0, 7);
+    const e = entryOf(sj, ym, clientId);
+    if (client.weekdays.includes(U.weekday(date))) e.off = e.off.filter((x) => x !== date);
+    else if (!e.extra.includes(date)) e.extra = e.extra.concat(date).sort();
+    e.plans[date] = cleanPlan(plan);
+    tidySchedule(sj, ym, clientId);
+    return true;
+  }
+
+  /** 追加で出る日をやめる(見込みも消す)。曜日パターンの日なら、見込みだけ消す */
+  function removeExtraDay(sj, clientId, date) {
+    const ym = String(date).slice(0, 7);
+    const e = (sj.schedule[ym] || {})[clientId];
+    if (!e) return;
+    e.extra = e.extra.filter((x) => x !== date);
+    if (e.plans) delete e.plans[date];
+    tidySchedule(sj, ym, clientId);
   }
 
   /**
@@ -224,7 +309,7 @@
       const recorded = new Set(sj.records.filter((r) => r.clientId === c.id && r.date.startsWith(ym)).map((r) => r.date));
       for (const date of plannedDates(sj, ym, c)) {
         if (date < today || recorded.has(date)) continue;
-        planned += dailyExpected(c);
+        planned += dayExpected(sj, c, date);
         plannedDays++;
       }
     }
@@ -328,7 +413,45 @@
     return plan.rows.length;
   }
 
-  if (MT.store) MT.store.defineSection('sidejob', { create, normalize, finalize, hasContent, summarize });
+  /**
+   * 自動の反映:対応する入金予定の金額が予想額と違えば、予想額にする(入金済みにした入金は変えない)。
+   * 画面を開いたとき・データが変わったときに呼ぶ(app.js の定期処理)。
+   * @returns {number} 直した入金予定の数
+   */
+  function syncPayments(d, today) {
+    if (!d.sidejob || !d.payments) return 0;
+    let n = 0;
+    for (const r of paymentPlan(d, today).rows) {
+      const inc = d.payments.incomes.find((i) => i.id === r.incomeId);
+      if (!inc || inc.done || inc.amount === r.to) continue;
+      inc.amount = r.to;
+      n++;
+    }
+    return n;
+  }
+
+  /** 自動の反映で直す入金予定があるか(書き換えずに調べる) */
+  function needsPaymentSync(d, today) {
+    if (!d.sidejob || !d.payments) return false;
+    return paymentPlan(d, today).rows.some((r) => {
+      const inc = d.payments.incomes.find((i) => i.id === r.incomeId);
+      return inc && !inc.done && inc.amount !== r.to;
+    });
+  }
+
+  /** この入金予定に対応している依頼元(自動で入る入金か) */
+  function clientsForIncome(sj, incomeId) {
+    return sj ? sj.clients.filter((c) => c.payment.incomeId === incomeId) : [];
+  }
+
+  if (MT.store) {
+    MT.store.defineSection('sidejob', { create, normalize, finalize, hasContent, summarize });
+    // v5 → v6:副業の予定に、追加で出る日の見込み(plans)を足す。読み込み時の点検で空の見込みが入るので、版だけ上げる
+    MT.store.addMigration(5, (d) => {
+      d.schemaVersion = 6;
+      return d;
+    });
+  }
 
   MT.sidejobModel = {
     MAX_CLIENTS,
@@ -341,14 +464,19 @@
     findClient,
     clientName,
     recordTotal,
+    manNumber,
     contentOf,
     dailyExpected,
+    dayPlan,
+    dayExpected,
     newDraft,
     monthRecords,
     monthSummary,
     plannedDates,
     dayState,
     toggleDay,
+    setExtraDay,
+    removeExtraDay,
     forecast,
     trend,
     saveClient,
@@ -359,5 +487,8 @@
     confirmMonth,
     paymentPlan,
     applyPaymentPlan,
+    syncPayments,
+    needsPaymentSync,
+    clientsForIncome,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

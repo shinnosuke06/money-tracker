@@ -190,6 +190,27 @@ test('価格の自動取得:為替が取れなければ設定の手入力値、�
   // 通信できないときは、国内株・投資信託がすべて失敗扱い(価格は前回のまま)
   const r2 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK }, fetchImpl: async () => ({ ok: false, status: 500 }) });
   assert.equal(r2.prices['jp:X101'].ok, false);
+  // 通信そのものができない(ネットにつながらない・外部に接続できない画面)ときは、理由とお知らせを出す
+  const r3 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: async () => { throw new TypeError('Failed to fetch'); } });
+  assert.equal(r3.prices['jp:X101'].reason, '通信できませんでした');
+  assert.equal(r3.prices['us:XUS'].reason, '通信できませんでした');
+  assert.ok(r3.messages.some((m) => m.includes('外部に接続できない画面')));
+});
+
+test('価格の自動取得:コードが無い銘柄は取りに行かず、理由を付ける(証券会社の違いは関係しない)', async () => {
+  const { a } = fixture();
+  A.saveHolding(a, { id: 'nocode', broker: '証券C', account: 'tokutei', type: 'fund', code: '', name: 'ファンドZ', quantity: 1, avgPrice: 10000 });
+  const asked = [];
+  const report = await PR.fetchPrices({
+    assets: a,
+    secrets: { priceUrl: URL_OK },
+    fetchImpl: async (url) => (asked.push(url), { ok: true, json: async () => ({ version: 'v6', results: { X101: 1800 }, errors: [], errorDetails: {} }) }),
+  });
+  assert.ok(!decodeURIComponent(asked[0]).includes(',,'));
+  assert.match(report.prices[A.priceKey(a.holdings.find((h) => h.id === 'nocode'))].reason, /コードが未入力/);
+  assert.ok(report.messages.some((m) => m.includes('ファンドZ')));
+  A.applyPriceReport(a, report, NOW);
+  assert.match(a.holdings.find((h) => h.id === 'nocode').lastError, /コードが未入力/);
 });
 
 test('履歴:同じ日は上書きし、前回更新比は前の日の記録と比べる', () => {

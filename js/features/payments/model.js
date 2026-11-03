@@ -255,6 +255,14 @@
     return bill.amount !== null ? bill.amount : subTotal(bill, ym);
   }
 
+  /**
+   * 完全に未入力の支払いか:請求額が空欄で、内訳にも金額が 1 つも入っていない。
+   * (一部だけ入れた支払いは、空欄を 0 として計算する)
+   */
+  function isUnentered(bill, ym) {
+    return bill.amount === null && activeSubs(bill, ym).every((s) => s.amount === null);
+  }
+
   /** 内訳の合計が請求額を超えているか */
   function isOverSub(bill, ym) {
     return bill.amount !== null && subTotal(bill, ym) > bill.amount;
@@ -462,7 +470,9 @@
     const rows = accountRows(d, ym);
     const plan = planSummary(p, ym);
     return {
-      missingAmount: bills.filter((b) => b.amount === null && !b.done),
+      missingAmount: bills.filter((b) => isUnentered(b, ym) && !b.done),
+      missingSpecial: specialsFor(p, ym).filter((s) => s.amount === null && !s.done),
+      missingBalance: rows.filter((r) => r.balance === null),
       overSub: bills.filter((b) => isOverSub(b, ym)),
       noAccount: bills.filter((b) => !b.done && !b.accountId && billTotal(b, ym) !== 0),
       shortAccounts: rows.filter((r) => r.after < 0),
@@ -693,6 +703,7 @@
     activeSubs,
     subTotal,
     billTotal,
+    isUnentered,
     isOverSub,
     specialsFor,
     lines,

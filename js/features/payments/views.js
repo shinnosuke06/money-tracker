@@ -175,10 +175,12 @@
     const names = (list, f = (x) => x.name) => list.map(f).join('、');
     const go = (path) => () => MT.app.navigate(path);
     if (w.shortAccounts.length) items.push({ text: `引落後予想がマイナスの口座:${names(w.shortAccounts, (r) => `${r.name}(${U.yen(r.after)}円)`)}`, path: 'payments/income', label: '振り分けを見る' });
-    if (w.missingAmount.length) items.push({ text: `請求額が未入力:${names(w.missingAmount)}`, path: 'payments/bills', label: '入力する' });
+    if (w.missingAmount.length) items.push({ text: `請求額が未入力:${names(w.missingAmount)}`, path: 'payments/bills', label: '入力する', missing: true });
+    if (w.missingSpecial.length) items.push({ text: `金額が未入力の特別支出:${names(w.missingSpecial)}`, path: 'payments/bills', label: '入力する', missing: true });
+    if (w.missingBalance.length) items.push({ text: `現在残高が未入力の口座:${names(w.missingBalance)}`, path: 'payments', label: '下の口座をタップ', missing: true });
     if (w.overSub.length) items.push({ text: `内訳の合計が請求額を超えています:${names(w.overSub)}`, path: 'payments/bills', label: '確認する' });
     if (w.noAccount.length) items.push({ text: `引き落とし口座が未設定:${names(w.noAccount)}`, path: 'payments/bills', label: '設定する' });
-    if (w.missingIncome.length) items.push({ text: `金額が未入力の入金予定:${names(w.missingIncome)}`, path: 'payments/income', label: '入力する' });
+    if (w.missingIncome.length) items.push({ text: `金額が未入力の入金予定:${names(w.missingIncome)}`, path: 'payments/income', label: '入力する', missing: true });
     if (w.overAllocated.length) items.push({ text: `入金額より多く振り分けています:${names(w.overAllocated, (x) => x.income.name)}`, path: 'payments/income', label: '直す' });
     if (w.pastSpecials.length) items.push({ text: `支払月を過ぎた未済の特別支出:${names(w.pastSpecials)}`, path: 'payments/bills', label: '確認する' });
     if (!items.length) return null;
@@ -189,8 +191,9 @@
       h(
         'ul',
         { class: 'warn-list' },
-        items.map((x) => h('li', null, h('span', { text: x.text }), btn(x.label, { size: 'small', variant: 'ghost', onClick: go(x.path) })))
-      )
+        items.map((x) => h('li', null, h('span', { class: x.missing ? 'is-warn-text' : null, text: x.text }), btn(x.label, { size: 'small', variant: 'ghost', onClick: go(x.path) })))
+      ),
+      h('p', { class: 'hint', text: '金額を何も入れていない所は赤で「未入力」と出します。内訳の一部だけ入れた所は、空欄を 0 として計算します。' })
     );
   }
 
@@ -227,7 +230,7 @@
                 { class: 'acct-top' },
                 icon(r.kind === 'cash' ? 'wallet' : 'bank', 'acct-icon'),
                 h('span', { class: 'acct-name' }, r.name, h('small', { text: r.balanceDate ? `残高 ${U.shortDate(r.balanceDate)} 更新` : r.kind === 'cash' ? '手元現金' : '銀行口座' })),
-                h('span', { class: `acct-balance${r.balance === null ? ' is-missing' : negCls(r.balance)}`, text: r.balance === null ? '残高未入力' : yen(r.balance) })
+                h('span', { class: `acct-balance${r.balance === null ? ' is-missing' : negCls(r.balance)}`, text: r.balance === null ? '残高 未入力' : yen(r.balance) })
               ),
               h(
                 'span',
@@ -341,9 +344,10 @@
     const total = P.billTotal(b, ym);
     const due = dueText(b, ym);
     const missing = b.amount === null;
+    const unentered = P.isUnentered(b, ym); // 請求額も内訳も空欄 → 赤で「未入力」
     return h(
       'li',
-      { class: `pay-row${b.done ? ' is-done' : ''}` },
+      { class: `pay-row${b.done ? ' is-done' : ''}${unentered && !b.done ? ' is-unentered' : ''}` },
       checkBtn(b.done, `「${b.name}」を済にする`, () => toggle('bills', b.id)),
       h(
         'button',
@@ -366,9 +370,9 @@
         ),
         h(
           'span',
-          { class: `pay-amount${missing && !subs.length ? ' is-missing' : ''}` },
-          missing && !subs.length ? '未入力' : yen(total),
-          missing && subs.length ? h('small', { text: '請求額未入力(内訳の合計)' }) : null
+          { class: `pay-amount${unentered ? ' is-missing' : ''}` },
+          unentered ? '未入力' : yen(total),
+          missing && !unentered ? h('small', { text: '請求額未入力(内訳の合計)' }) : null
         )
       )
     );
@@ -380,7 +384,7 @@
     const showCheck = s.month <= ym;
     return h(
       'li',
-      { class: `pay-row${s.done ? ' is-done' : ''}${showCheck ? '' : ' no-check'}` },
+      { class: `pay-row${s.done ? ' is-done' : ''}${showCheck ? '' : ' no-check'}${s.amount === null && !s.done && s.month <= ym ? ' is-unentered' : ''}` },
       showCheck ? checkBtn(s.done, `「${s.name}」を済にする`, () => toggle('specials', s.id)) : null,
       h(
         'button',
@@ -512,9 +516,10 @@
   }
 
   function incomeRow(d, i) {
+    const auto = MT.sidejobModel ? MT.sidejobModel.clientsForIncome(d.sidejob, i.id) : [];
     return h(
       'li',
-      { class: `pay-row${i.done ? ' is-done' : ''}` },
+      { class: `pay-row${i.done ? ' is-done' : ''}${i.amount === null && !i.done ? ' is-unentered' : ''}` },
       checkBtn(i.done, `「${i.name}」を入金済にする`, () => toggle('incomes', i.id)),
       h(
         'button',
@@ -524,6 +529,7 @@
           'span',
           { class: 'pay-meta' },
           h('span', { class: 'chip', text: i.fixed ? '毎月固定' : '変動' }),
+          auto.length ? h('span', { class: 'chip chip-soft', text: `副業(${auto.map((c) => c.name).join('・')})から自動` }) : null,
           h('span', { text: i.targetId ? `優先:${P.accountName(d, i.targetId)}` : '振込先の指定なし' })
         ),
         h('span', { class: `pay-amount${i.amount === null ? ' is-missing' : ''}`, text: i.amount === null ? '未入力' : yen(i.amount) })
@@ -902,7 +908,9 @@
     const d = store.get();
     if (!d || !d.payments) return false;
     if (d.payments.notice) return true;
-    return P.accountRows(d, d.payments.month).some((r) => r.after < 0);
+    const w = P.warnings(d, d.payments.month);
+    // 引落後予想がマイナスの口座と、完全に未入力の支払い・入金予定
+    return w.shortAccounts.length > 0 || w.missingAmount.length > 0 || w.missingIncome.length > 0;
   }
 
   MT.views = MT.views || {};
