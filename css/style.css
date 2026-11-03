@@ -1239,6 +1239,36 @@ button {
   background: var(--toast-error-bg);
   color: var(--toast-error-text);
 }
+.toast-update {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 16px;
+  pointer-events: auto;
+}
+.toast-update-text {
+  flex: 1;
+  min-width: 0;
+}
+.toast-action,
+.toast-close {
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.toast-action {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.toast-close {
+  background: transparent;
+  color: inherit;
+}
 .toast.is-leaving {
   opacity: 0;
   transform: translateY(6px);

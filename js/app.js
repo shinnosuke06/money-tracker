@@ -173,6 +173,8 @@
     });
 
     render();
+    // 新しい版が公開されたら知らせる(GitHub Pages などでファイルとして開いたとき)
+    if (MT.update) MT.update.start();
 
     if (res.status === 'corrupt') {
       toast('保存データが壊れていたため、空の状態で始めました(元のデータは別名で残しています)', { type: 'error', duration: 6000 });
