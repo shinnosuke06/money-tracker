@@ -9,6 +9,7 @@ const path = require('node:path');
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 require('../js/core/util.js');
 require('../js/core/store.js');
+require('../js/features/future/model.js'); // v7 → v8 の移行
 require('../js/core/update.js');
 
 const { store, update } = globalThis.MT;

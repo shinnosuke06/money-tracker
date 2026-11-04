@@ -7,12 +7,8 @@
   const MT = root.MT;
   const { h } = MT.ui;
 
-  const PLANS = {
-    future: {
-      title: '将来予想',
-      lines: ['ライフプラン(収入・支出の見通し)', '資産の将来予想'],
-    },
-  };
+  // 段階5で「将来予想」を本物の画面にしたので、いまは準備中の画面はない(段階6で使う)
+  const PLANS = {};
 
   function placeholder(key) {
     const plan = PLANS[key];

@@ -13,6 +13,7 @@ globalThis.localStorage = {
 
 require('../js/core/util.js');
 require('../js/core/store.js');
+require('../js/features/future/model.js'); // v7 → v8 の移行
 require('../js/features/monthly/model.js');
 require('../js/features/payments/model.js');
 require('../js/features/assets/model.js');
@@ -104,7 +105,7 @@ test('v6 のデータを開くと v7 になり、支払いは引き落とし日�
   v6.schemaVersion = 6;
   const res = store.prepare(JSON.parse(JSON.stringify(v6)));
   assert.equal(res.ok, true);
-  assert.equal(res.data.schemaVersion, 7);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION); // v7 を通って最新の版まで上がる
   assert.equal(res.data.payments.billOrder, 'due');
   assert.deepEqual(names(P.activeBills(res.data.payments, YM)), ['支払い10日', '支払い20日', '支払い27日', '日付なし']);
 });

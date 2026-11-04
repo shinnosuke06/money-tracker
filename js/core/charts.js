@@ -23,6 +23,7 @@
     return {
       series,
       other: cssVar('--series-other'),
+      negative: cssVar('--negative'), // 資金不足などの印(状態の色。系列の色には使わない)
       surface: cssVar('--surface'),
       grid: cssVar('--chart-grid'),
       axis: cssVar('--chart-axis'),

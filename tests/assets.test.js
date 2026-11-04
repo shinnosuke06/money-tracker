@@ -13,6 +13,7 @@ globalThis.localStorage = {
 
 require('../js/core/util.js');
 require('../js/core/store.js');
+require('../js/features/future/model.js'); // v7 → v8 の移行
 require('../js/core/secrets.js');
 require('../js/features/monthly/model.js');
 require('../js/features/payments/model.js');

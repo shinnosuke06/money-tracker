@@ -34,7 +34,7 @@
           'ul',
           { class: 'more-list' },
           entry('#/inventory', 'box', '在庫(ポケカ)', inv && inv.rows.length ? `評価額 ${U.yen(inv.value)}円・${inv.rows.length}商品` : '商品の在庫・相場・売却の記録'),
-          entry('#/future', 'trend', '将来予想', '準備中(段階5)'),
+          entry('#/future', 'trend', '将来予想', d.future && d.future.plans.length ? `ライフプラン ${d.future.plans.length}件・年ごとの表と取り崩し案` : 'ライフプラン・資産の将来予想・取り崩し案'),
           entry('#/settings', 'settings', '設定', 'バックアップ・価格の自動取得・旧アプリの取り込み')
         )
       )

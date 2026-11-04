@@ -287,6 +287,45 @@
     return { clients, records: records.map((r) => MT.sidejobModel.cleanRecord(r)), schedule };
   }
 
+  /**
+   * 将来予想:記録から作ったプランに、架空の年齢・収入・出費を入れる。
+   * 2 つ目は複製して「車の買い替え」をオフにしたもの(比較用)
+   */
+  function buildFuture(data, now) {
+    const F = MT.futureModel;
+    if (!F) return undefined;
+    const f = F.create();
+    const plan = F.newPlan(data, now, '車を買い替える');
+    const y = Number(plan.startYM.slice(0, 4));
+    plan.birthYM = U.ymAdd(plan.startYM, -12 * 42 - 3); // 架空:42 歳
+    plan.incomes = [
+      { name: '給与(手取り)', fromAge: null, toAge: 59, monthly: 285000 },
+      { name: '再雇用(手取り)', fromAge: 60, toAge: 64, monthly: 180000 },
+      { name: '年金', fromAge: 65, toAge: null, monthly: 130000 },
+    ].map((r) => ({ ...r, id: null }));
+    plan.extras = [
+      { name: '賞与(手取り)', year: y + 1, month: 7, amount: 300000, untilYear: y + 17 },
+      { name: '退職金', year: y + 18, month: 3, amount: 6000000, untilYear: null },
+    ];
+    plan.repayments = [{ name: '家族からの返済', monthly: 20000, endYM: U.makeYM(y + 2, 3) }];
+    plan.living.changes = [{ fromAge: 65, monthly: Math.round(plan.living.monthly * 1.3) }]; // 架空:医療・趣味で増える
+    plan.sidejob.untilYM = U.makeYM(y + 1, 12);
+    const home = plan.loans.find((l) => l.name === '住宅ローン');
+    if (home) home.endYM = U.makeYM(y + 22, 3);
+    plan.oneTime = [
+      { name: '車の買い替え', ym: U.makeYM(y + 3, 4), amount: 2500000, enabled: true },
+      { name: '家の修繕', ym: U.makeYM(y + 10, 6), amount: 1500000, enabled: true },
+    ];
+    plan.inflation = 1;
+    const id = F.addPlan(f, F.cleanPlan(plan, now));
+    const id2 = F.duplicatePlan(f, id, '車を買い替えない');
+    const p2 = F.findPlan(f, id2);
+    p2.oneTime.find((r) => r.name === '車の買い替え').enabled = false;
+    f.activeId = id;
+    f.compare = { a: id, b: id2 };
+    return f;
+  }
+
   function build(now = new Date()) {
     const data = MT.store.createEmpty(now);
     const last = U.ymAdd(U.currentYM(now), -2);
@@ -314,6 +353,8 @@
     data.assets = buildAssets(now);
     data.inventory = buildInventory(now);
     data.sidejob = buildSidejob(now);
+    const future = buildFuture(data, now);
+    if (future) data.future = future;
     return data;
   }
 

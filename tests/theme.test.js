@@ -16,6 +16,7 @@ globalThis.localStorage = {
 require('../js/core/util.js');
 require('../js/core/theme.js');
 require('../js/core/store.js');
+require('../js/features/future/model.js'); // v7 → v8 の移行
 require('../js/features/monthly/model.js');
 require('../js/features/payments/model.js');
 require('../js/features/assets/model.js');
@@ -145,6 +146,8 @@ const PAIRS = [
   ['text-2', 'negative-soft'],
   ['warn-text', 'warn-soft'],
   ['warn-text', 'surface-2'],
+  ['text-2', 'surface-3'], // 将来予想の「売りたくない」の札
+  ['accent-text', 'accent-soft'],
   ['on-danger', 'danger'],
   ['warn-text', 'surface'],
   ['warn-ink', 'warn-soft'],

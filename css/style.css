@@ -3336,3 +3336,424 @@ html.is-shot .theme-toggle {
 .filter-chip[aria-pressed="true"].cli-mark::before {
   box-shadow: 0 0 0 1.5px var(--on-accent);
 }
+
+/* =========================================================
+   段階5:将来予想(ライフプラン)
+   ========================================================= */
+
+.fx-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -2px 2px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.fx-disclaimer-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+.sheet .fx-disclaimer {
+  margin: 12px 0 0;
+}
+.fx-planbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.fx-planbar-label {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.fx-planbar .field-select {
+  flex: 1;
+  min-width: 0;
+}
+.fx-strong {
+  font-weight: 700;
+}
+
+/* 要約・比較・計算の確認の小さな表 */
+.fx-sum-wrap {
+  overflow-x: auto;
+}
+.fx-sum {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.fx-sum th,
+.fx-sum td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.fx-sum thead th {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.fx-sum thead th small {
+  display: block;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.fx-sum tbody th {
+  width: 34%;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.fx-sum tr:last-child th,
+.fx-sum tr:last-child td {
+  border-bottom: 0;
+}
+.fx-pattern-label {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.fx-pattern .seg {
+  margin-bottom: 0;
+}
+
+/* 年ごとの表(横スクロール。年の列は固定) */
+.fx-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-top: 1px solid var(--line);
+}
+.fx-table {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fx-table th,
+.fx-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+.fx-table thead th {
+  background: var(--surface-2);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.fx-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  text-align: left;
+  box-shadow: 1px 0 0 var(--line);
+}
+.fx-table thead th:first-child {
+  background: var(--surface-2);
+}
+.fx-table tbody tr {
+  cursor: pointer;
+}
+.fx-table tbody tr:active td,
+.fx-table tbody tr:active th {
+  background: var(--surface-2);
+}
+.fx-table tr.is-short th,
+.fx-table tr.is-short td {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+.fx-table tr.is-short th:first-child {
+  box-shadow: inset 3px 0 0 var(--negative), 1px 0 0 var(--line);
+}
+.fx-year-btn {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.fx-year-btn small {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.fx-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  vertical-align: 2px;
+}
+.fx-legend .fx-dot {
+  margin-left: 2px;
+}
+.fx-legend-short {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--negative-soft);
+  color: var(--negative);
+  font-weight: 700;
+}
+/* 資金不足の印(グラフの ▲ と同じ) */
+.fx-tri {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 6px;
+  border-right: 6px solid transparent;
+  border-bottom: 10px solid var(--negative);
+  border-left: 6px solid transparent;
+  vertical-align: -1px;
+}
+.fx-mark-note {
+  margin-top: 8px;
+}
+
+/* 取り崩し案 */
+.fx-draw-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: fx;
+}
+.fx-draw-list li {
+  counter-increment: fx;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.fx-draw-list li::before {
+  content: counter(fx);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 700;
+}
+.fx-draw-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fx-draw-name small {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.fx-draw-nums {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fx-draw-nums small {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.fx-draw-total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 8px;
+  padding: 4px 2px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+/* 売却優先度の札 */
+.chip.fx-pri-first {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.chip.fx-pri-ifNeeded {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.chip.fx-pri-keep {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.fx-warn-line {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn-text);
+}
+
+/* 条件の画面 */
+.fx-group {
+  border-top: 1px solid var(--line);
+}
+.fx-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 16px;
+  list-style: none;
+  cursor: pointer;
+}
+.fx-group summary::-webkit-details-marker {
+  display: none;
+}
+.fx-group-sum {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fx-group > .pay-list {
+  border-top: 1px solid var(--line);
+}
+.fx-stat-btn {
+  appearance: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fx-stat-btn:active {
+  background: var(--surface-3);
+}
+.fx-kv .kv-value {
+  overflow-wrap: anywhere;
+}
+.fx-assume {
+  margin-top: 8px;
+}
+/* オン/オフのスイッチ */
+.fx-switch {
+  appearance: none;
+  position: relative;
+  flex: none;
+  align-self: center;
+  width: 44px;
+  height: 26px;
+  margin: 0 2px 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.fx-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-chip);
+  transition: transform 0.15s ease;
+}
+.fx-switch.is-on {
+  background: var(--positive);
+}
+.fx-switch.is-on .fx-switch-knob {
+  transform: translateX(18px);
+}
+.pay-row.is-off .pay-name,
+.pay-row.is-off .pay-amount {
+  color: var(--text-3);
+}
+/* 年齢・年の入力(3 桁区切りにしない) */
+.int-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.int-field .int-input {
+  width: 8em;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+/* 比較 */
+.fx-cmp-pick {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.fx-diff {
+  margin: 10px 0 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fx-check-all {
+  margin: 8px 0 0;
+  font-weight: 700;
+}
+.fx-rules li {
+  margin-bottom: 6px;
+}
+.fx-sum tbody th small {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.fx-ym small {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+}
+.fx-num {
+  white-space: nowrap;
+}
+.fx-sum td {
+  overflow-wrap: normal;
+}
+.fx-ym > span,
+.fx-ym small,
+.fx-ok > span {
+  display: inline-block;
+  white-space: nowrap;
+}
+.fx-ym small {
+  display: block;
+}
+.fx-sum thead th:first-child {
+  text-align: left;
+}
