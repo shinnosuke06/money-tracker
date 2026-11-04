@@ -294,3 +294,40 @@ test('v7 のデータを開くと v8 になり、空の将来予想の区画が�
   assert.deepEqual(res.data.future.plans, []);
   assert.equal(JSON.stringify(res.data.payments), before);
 });
+
+test('収入の初期値:「変動」で空欄の入金予定も、履歴の直近 3 か月に毎月あれば平均で入れる', () => {
+  const d = store.createEmpty(NOW);
+  const P = globalThis.MT.paymentsModel;
+  const p = d.payments;
+  P.saveIncome(p, { name: '給与', amount: null, fixed: false });
+  P.saveIncome(p, { name: '固定の収入', amount: 50000, fixed: true });
+  P.saveIncome(p, { name: 'たまの入金', amount: null, fixed: false });
+  p.history = ['2026-08', '2026-09', '2026-10'].map((month, i) => ({
+    month,
+    income: 0,
+    payment: 0,
+    balance: null,
+    catTotals: {},
+    details: [],
+    incomeDetails: [{ name: '給与', amount: 300000 + i * 3000 }, ...(i === 1 ? [{ name: 'たまの入金', amount: 9000 }] : [])],
+  }));
+  const rows = F.incomesFrom(d);
+  assert.deepEqual(rows.map((r) => [r.name, r.monthly]), [['給与', 303000], ['固定の収入', 50000]]);
+});
+
+test('最初の1年の内訳と、収入が少ないときの注意', () => {
+  const p = plan({ years: 2, cash: 0, incomes: [{ name: '収入', monthly: 100000 }], living: { monthly: 150000, changes: [] }, savings: [{ name: '積立', monthly: 20000 }], extras: [{ name: '賞与', year: 2030, month: 6, amount: 120000 }] });
+  const fy = F.firstYear(p);
+  assert.equal(fy.months, 12);
+  assert.equal(fy.income.work, 100000);
+  assert.equal(fy.income.extra, 10000);
+  assert.equal(fy.expense.saving, 20000);
+  assert.equal(fy.net, 100000 + 10000 - 150000 - 20000);
+  assert.equal(fy.netExSaving, 100000 + 10000 - 150000);
+  assert.ok(F.warnings(p).some((w) => w.includes('赤字')));
+  assert.ok(F.warnings(plan({ incomes: [] })).some((w) => w.includes('収入」が入っていません')));
+  // 積立だけで現金が減るときは「赤字」と言わない
+  const q = plan({ years: 1, cash: 0, incomes: [{ name: '収入', monthly: 100000 }], living: { monthly: 90000, changes: [] }, savings: [{ name: '積立', monthly: 20000 }] });
+  assert.equal(F.firstYear(q).net < 0, true);
+  assert.equal(F.warnings(q).some((w) => w.includes('赤字')), false);
+});

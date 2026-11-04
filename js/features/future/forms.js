@@ -461,6 +461,27 @@
     toast(added ? `特別支出から ${added}件を取り込みました(毎年として。間隔などは直せます)` : '取り込む特別支出はありません(取り込み済みか、今後の未済がありません)', { duration: 4000 });
   }
 
+  /** 収入を記録(入金予定・履歴)から足す(同じ名前の行があるものは足さない) */
+  function importIncomesFlow(planId) {
+    const found = F.incomesFrom(store.get());
+    let added = 0;
+    updatePlan(planId, (p) => {
+      const have = new Set(p.incomes.map((r) => r.name));
+      for (const r of found) {
+        if (have.has(r.name)) continue;
+        if (F.saveRow(p, 'incomes', { ...r, id: null })) added++;
+      }
+    });
+    toast(
+      added
+        ? `収入を ${added}件 足しました。何歳から何歳までかを直してください`
+        : found.length
+          ? '記録の収入は、すでに入っています'
+          : '記録から収入が見つかりませんでした(入金予定の「毎月固定」か、履歴の直近3か月に毎月ある入金を拾います)。「追加」から入れてください',
+      { duration: 5000 }
+    );
+  }
+
   function pickRepaymentFlow(planId) {
     const cands = F.repaymentCandidates(store.get());
     if (!cands.length) return toast('支払い管理に入金予定がありません');
@@ -550,6 +571,7 @@
     reloadFromPayments,
     importYearlyFlow,
     pickRepaymentFlow,
+    importIncomesFlow,
     recalcSidejob,
     recalcLiving,
     createPlanFlow,

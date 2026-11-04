@@ -135,7 +135,7 @@
     container.append(planBar(f, plan));
     const warns = F.warnings(plan);
     if (warns.length) container.append(warnNotice(warns));
-    container.append(summaryCard(plan, all));
+    container.append(firstYearCard(plan), summaryCard(plan, all));
 
     // グラフ
     const canvas = h('canvas', { role: 'img', 'aria-label': state.chart === 'total' ? '総資産の推移(3 パターン)のグラフ。数値は下の年ごとの表を参照。' : '現金と投資の内訳のグラフ。数値は下の年ごとの表を参照。' });
@@ -168,6 +168,55 @@
     );
     if (state.chart === 'total') CH.totals('future-main', canvas, fallback, all);
     else CH.stack('future-main', canvas, fallback, res);
+  }
+
+  /** 最初の1年の内訳(月平均):マイナスになる理由が分かるように */
+  function firstYearCard(plan) {
+    const fy = F.firstYear(plan);
+    const line = (label, v, sign, { sub = false, keep = false } = {}) => {
+      if (!v && !keep) return null;
+      const txt = v ? `${sign > 0 ? '+' : MINUS}${yen(v)}` : '0円';
+      return h('div', { class: `kv${sub ? ' fx-kv-sub' : ''}` }, h('span', { class: 'kv-label', text: label }), h('span', { class: `kv-value${v ? (sign > 0 ? ' is-pos' : ' is-neg') : ''}`, text: txt }));
+    };
+    const total = (label, v, note) =>
+      h(
+        'div',
+        { class: 'kv kv-total' },
+        h('span', { class: 'kv-label' }, label, note ? h('small', { text: note }) : null),
+        h('span', { class: `kv-value ${tone(v)}`.trim(), text: `${U.yenSigned(v)}円` })
+      );
+    const months = fy.months < 12 ? `${fy.months}か月` : '1年';
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: `最初の${months}の内訳(月平均)` }),
+      h('p', { class: 'hint', text: `${U.ymLabel(fy.fromYM)}〜${U.ymLabel(fy.toYM)}。予想がマイナスになるときは、まずここを確かめてください。` }),
+      h(
+        'div',
+        { class: 'kv-list fx-kv' },
+        line('入ってくるお金', fy.incomeTotal, 1, { keep: true }),
+        fy.income.work
+          ? line('収入(給与・年金など)', fy.income.work, 1, { sub: true })
+          : h('div', { class: 'kv fx-kv-sub' }, h('span', { class: 'kv-label', text: '収入(給与・年金など)' }), h('span', { class: 'kv-value is-neg', text: '0円(入っていません)' })),
+        line('副業', fy.income.sidejob, 1, { sub: true }),
+        line('家族などからの返済', fy.income.repay, 1, { sub: true }),
+        line('臨時収入(1年分を12で割った額)', fy.income.extra, 1, { sub: true }),
+        line('出ていくお金', fy.expenseTotal, -1, { keep: true }),
+        line('生活費', fy.expense.living, -1, { sub: true, keep: true }),
+        line('ローン', fy.expense.loans, -1, { sub: true }),
+        line('毎年の費用(12で割った額)', fy.expense.yearly, -1, { sub: true }),
+        line('単発の出費(12で割った額)', fy.expense.oneTime, -1, { sub: true }),
+        line('積立(投資へ移すだけ)', fy.expense.saving, -1, { sub: true }),
+        total('現金の増減', fy.net),
+        fy.expense.saving ? total('積立を除くと', fy.netExSaving, '積立は投資に移るだけで、総資産は減りません') : null
+      ),
+      h(
+        'p',
+        { class: 'hint' },
+        '初期値は最新の記録から自動で入れた仮の値です。赤字が大きいときは、「収入」に給与・年金などが入っているか(「記録から足す」で、入金予定の「毎月固定」と、支払いの履歴に毎月ある入金を拾えます)、「生活費」「毎年の費用」が多すぎないかを確かめてください。'
+      ),
+      h('div', { class: 'button-row' }, btn('条件を確かめる', { size: 'small', icon: 'edit', onClick: () => MT.app.navigate('future/plan') }))
+    );
   }
 
   function summaryCard(plan, all) {
@@ -449,7 +498,8 @@
         title: '収入(手取りの月額)',
         hint: '働く期間・再雇用・年金などを、何歳から何歳まで月いくらで入れます。',
         describe: (r) => ({ name: r.name, sub: ageRange(r.fromAge, r.toAge), amount: `+${yen(r.monthly)}`, amountCls: 'is-in' }),
-        empty: '収入がありません。「追加」から入れてください。',
+        empty: '収入がありません。「追加」から入れるか、「記録から足す」を押してください。',
+        actions: [btn('記録から足す', { size: 'small', icon: 'sync', onClick: () => UI.importIncomesFlow(id) })],
       }),
       listCard({
         plan,

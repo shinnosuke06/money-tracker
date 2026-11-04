@@ -3757,3 +3757,16 @@ html.is-shot .theme-toggle {
 .fx-sum thead th:first-child {
   text-align: left;
 }
+.fx-kv-sub .kv-label {
+  padding-left: 14px;
+  font-size: 13px;
+}
+.fx-kv-sub .kv-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+.kv-total .kv-label small {
+  display: block;
+  font-size: 11px;
+  color: var(--text-3);
+}

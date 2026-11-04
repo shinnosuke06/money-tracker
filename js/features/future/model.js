@@ -415,12 +415,13 @@
       const age = ageAt(plan, ym);
       const infl = Math.pow(1 + plan.inflation / 100, k / 12);
 
-      // 収入
-      let income = 0;
-      for (const r of plan.incomes) if (inAge(age, r.fromAge, r.toAge)) income += r.monthly;
-      if (plan.sidejob.monthly && (!plan.sidejob.untilYM || ym <= plan.sidejob.untilYM)) income += plan.sidejob.monthly;
-      for (const r of plan.repayments) if (!r.endYM || ym <= r.endYM) income += r.monthly;
-      for (const r of plan.extras) if (extraHits(r, ym)) income += r.amount;
+      // 収入(内訳も残す:収入の行・副業・返済・臨時収入)
+      const parts = { work: 0, sidejob: 0, repay: 0, extra: 0 };
+      for (const r of plan.incomes) if (inAge(age, r.fromAge, r.toAge)) parts.work += r.monthly;
+      if (plan.sidejob.monthly && (!plan.sidejob.untilYM || ym <= plan.sidejob.untilYM)) parts.sidejob += plan.sidejob.monthly;
+      for (const r of plan.repayments) if (!r.endYM || ym <= r.endYM) parts.repay += r.monthly;
+      for (const r of plan.extras) if (extraHits(r, ym)) parts.extra += r.amount;
+      const income = parts.work + parts.sidejob + parts.repay + parts.extra;
 
       // 支出
       const living = Math.round(livingAt(plan, age) * infl);
@@ -469,6 +470,7 @@
         ym,
         age,
         income,
+        incomeParts: parts,
         living,
         loans,
         saving,
@@ -572,9 +574,51 @@
     return { year, sales: y.sales, gross: y.drawGross, tax: y.drawTax, net: y.drawNet };
   }
 
+  /**
+   * 最初の 12 か月(期間が短ければその月数)の月平均の内訳。予想がマイナスになる理由を見るために使う
+   * 積立は現金から投資へ移すだけなので、「積立を除いた差し引き」も出す
+   */
+  function firstYear(plan) {
+    const ms = simulate(plan, plan.returns.mid).months.slice(0, 12);
+    const n = ms.length || 1;
+    const avg = (f) => Math.round(ms.reduce((t, m) => t + f(m), 0) / n);
+    const income = {
+      work: avg((m) => m.incomeParts.work),
+      sidejob: avg((m) => m.incomeParts.sidejob),
+      repay: avg((m) => m.incomeParts.repay),
+      extra: avg((m) => m.incomeParts.extra),
+    };
+    const expense = { living: avg((m) => m.living), loans: avg((m) => m.loans), yearly: avg((m) => m.yearly), oneTime: avg((m) => m.oneTime), saving: avg((m) => m.saving) };
+    const incomeTotal = income.work + income.sidejob + income.repay + income.extra;
+    const expenseTotal = expense.living + expense.loans + expense.yearly + expense.oneTime + expense.saving;
+    return {
+      months: ms.length,
+      fromYM: ms.length ? ms[0].ym : plan.startYM,
+      toYM: ms.length ? ms[ms.length - 1].ym : plan.startYM,
+      income,
+      expense,
+      incomeTotal,
+      expenseTotal,
+      net: incomeTotal - expenseTotal, // 現金の増減(月平均)
+      netExSaving: incomeTotal - expenseTotal + expense.saving, // 積立を除いた差し引き(総資産の増減に近い)
+      cashEnd: ms.length ? ms[ms.length - 1].cash : plan.cash,
+      totalEnd: ms.length ? ms[ms.length - 1].total : plan.cash,
+      totalStart: plan.cash + plan.assets.reduce((t, a) => t + a.value, 0),
+    };
+  }
+
   /** 気をつけること(画面に出す) */
   function warnings(plan) {
     const out = [];
+    // 収入の入れ忘れ・生活費の入れすぎで、すぐにマイナスになっていないか
+    if (!plan.incomes.length) {
+      out.push('給与・年金などの「収入」が入っていません。そのため、すぐにマイナスになる計算になっています。「条件」の「収入」で手取りの月額を入れるか、「記録から足す」を押してください。');
+    } else {
+      const fy = firstYear(plan);
+      if (fy.netExSaving < 0) {
+        out.push(`最初の1年は、毎月の収入より支出が多い計算です(積立を除いて月平均 ${U.yen(-fy.netExSaving)}円の赤字)。収入の入れ忘れや、生活費・毎年の費用の初期値が多すぎないかを、「予想」の「最初の1年の内訳」で確かめてください。`);
+      }
+    }
     const usesAge = plan.incomes.some((r) => r.fromAge !== null || r.toAge !== null) || plan.living.changes.length > 0;
     if (!plan.birthYM && usesAge) out.push('生年月(または今の年齢)が未入力のため、年齢で決まる収入・生活費の変化が計算に入っていません。「条件」の「基本」で入れてください。');
     else if (!plan.birthYM) out.push('生年月(または今の年齢)を「条件」の「基本」で入れると、表に年齢が出て、「何歳から何歳まで」の収入や年金を入れられます。');
@@ -679,12 +723,28 @@
       });
   }
 
-  /** 収入の初期値:支払い管理の入金予定のうち「毎月固定」で、副業から自動で入るもの以外 */
+  /**
+   * 収入の初期値:支払い管理の入金予定のうち、副業から自動で入るもの以外で、
+   *  - 「毎月固定」で金額があるもの → その金額
+   *  - それ以外(「変動」で月替わりに空欄になったものなど)でも、履歴の直近 3 か月に毎月同じ名前で入っているもの → その平均
+   */
   function incomesFrom(d) {
     const p = d.payments;
     if (!p) return [];
     const auto = new Set(d.sidejob ? d.sidejob.clients.map((c) => c.payment.incomeId).filter(Boolean) : []);
-    return p.incomes.filter((i) => i.fixed && !auto.has(i.id) && i.amount).map((i) => cleanIncome({ name: i.name, fromAge: null, toAge: null, monthly: i.amount }));
+    const hist = p.history.slice(-3);
+    const fromHistory = (name) => {
+      if (!hist.length) return 0;
+      const vals = hist.map((h) => h.incomeDetails.filter((x) => x.name === name).reduce((t, x) => t + x.amount, 0));
+      return vals.every((v) => v > 0) ? Math.round(vals.reduce((t, v) => t + v, 0) / vals.length) : 0;
+    };
+    const out = [];
+    for (const i of p.incomes) {
+      if (auto.has(i.id)) continue;
+      const monthly = i.fixed && i.amount ? i.amount : fromHistory(i.name);
+      if (monthly > 0) out.push(cleanIncome({ name: i.name, fromAge: null, toAge: null, monthly }));
+    }
+    return out;
   }
 
   /** 家族などからの返済の候補:入金予定のうち、副業から自動で入るもの以外 */
@@ -927,6 +987,7 @@
     sidejobFrom,
     reloadStart,
     newPlan,
+    firstYear,
     checks,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
