@@ -40,7 +40,9 @@
   /* 金額の色:プラスは緑、マイナスは赤(どちらも + / − の符号を必ず付ける) */
   --positive: #006b00;
   --on-positive: #ffffff;
+  --positive-soft: #e4f2e2; /* 入る・足りる の薄い塗り */
   --negative: #c23030; /* マイナス・エラーの文字 */
+  --negative-soft: #fbeaea; /* 出る・不足 の薄い塗り */
 
   /* 削除などの危険な操作 */
   --danger: #c23030; /* ボタンの塗り */
@@ -107,7 +109,9 @@
 
   --positive: #4cc94c;
   --on-positive: #0b0b0b;
+  --positive-soft: #16301a;
   --negative: #f48585;
+  --negative-soft: #3a1d1d;
 
   --danger: #bf3434;
   --on-danger: #ffffff;
@@ -1689,9 +1693,9 @@ button {
   color: transparent;
 }
 .check-btn.is-on .icon {
-  background: var(--accent);
+  background: var(--positive);
   box-shadow: none;
-  color: var(--on-accent);
+  color: var(--on-positive);
 }
 .pay-main {
   flex: 1;
@@ -1728,7 +1732,7 @@ button {
   color: var(--text-3);
 }
 .meta-due.is-soon {
-  color: var(--accent-text);
+  color: var(--warn-text);
   font-weight: 700;
 }
 .meta-due.is-warn {
@@ -1865,6 +1869,10 @@ details.ended > summary {
   gap: 8px;
   font-variant-numeric: tabular-nums;
 }
+.need-list li > span:last-child {
+  flex: none;
+  white-space: nowrap;
+}
 .alloc-list {
   display: grid;
   gap: 8px;
@@ -1883,7 +1891,7 @@ details.ended > summary {
 }
 .alloc-total {
   font-variant-numeric: tabular-nums;
-  color: var(--accent-text);
+  color: var(--positive);
 }
 .alloc-items {
   margin: 6px 0 0;
@@ -1966,8 +1974,24 @@ details.ended > summary {
   text-align: left;
   cursor: pointer;
 }
+.hist-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
 .hist-month {
   font-weight: 700;
+}
+.hist-net {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hist-net small {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
 }
 .hist-nums {
   display: grid;
@@ -2159,7 +2183,7 @@ details.ended > summary {
    ========================================================= */
 
 .is-pos {
-  color: var(--positive);
+  color: var(--positive) !important;
 }
 
 .kv-list {
@@ -3146,6 +3170,14 @@ html.is-shot .theme-toggle {
   align-items: center;
   gap: 8px;
   flex: none;
+  margin-left: auto;
+}
+/* 狭い画面では、右側のボタンを見出しの下へ回す(見出しが細切れにならないように) */
+.card-head:has(.card-head-side) {
+  flex-wrap: wrap;
+}
+.card-head:has(.card-head-side) .card-title {
+  white-space: nowrap;
 }
 .reorder-presets {
   margin-bottom: 10px;
@@ -3208,4 +3240,99 @@ html.is-shot .theme-toggle {
 .icon-btn.icon-btn-sm {
   width: 34px;
   height: 40px;
+}
+
+/* ---------------------------------------------------------------
+   金額の色分け(入る・足りる=緑、出る・不足=赤、残りわずか=黄)
+   色だけに頼らず、+ / − の符号や「不足」「残りわずか」の言葉も一緒に出す
+   --------------------------------------------------------------- */
+.is-warn-num {
+  color: var(--warn-text) !important;
+}
+.stat.tone-pos {
+  background: var(--positive-soft);
+}
+.stat.tone-pos .stat-value {
+  color: var(--positive);
+}
+.stat.tone-neg {
+  background: var(--negative-soft);
+}
+.stat.tone-neg .stat-value {
+  color: var(--negative);
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.status-pill.is-ok {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+.status-pill.is-tight {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.status-pill.is-short {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+.cf-net-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cf-net-head .summary-label {
+  margin: 0;
+}
+.cf-net-head .status-pill {
+  margin-left: 0;
+  font-size: 12px;
+  padding: 2px 10px;
+}
+.acct-row.is-short {
+  box-shadow: inset 3px 0 0 var(--negative);
+}
+.acct-row.is-tight {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+.acct-flow .is-pos,
+.acct-flow .is-neg {
+  font-weight: 700;
+}
+.acct-after .num.is-pos {
+  color: var(--positive);
+}
+.pay-amount.is-in {
+  color: var(--positive);
+}
+.job-row.is-confirmed .pay-amount {
+  color: var(--positive);
+}
+.sum-strong {
+  font-weight: 700;
+}
+/* 依頼元ごとの色の点(カレンダーと同じ --cli) */
+.cli-mark::before {
+  content: "";
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--cli);
+  vertical-align: 1px;
+}
+.filter-chip[aria-pressed="true"].cli-mark::before {
+  box-shadow: 0 0 0 1.5px var(--on-accent);
 }

@@ -47,6 +47,7 @@
   const MEMO_MAX = 1000;
   const ALLOCATION_UNIT = 1000; // 不足額はこの単位で切り上げ
   const SAVING_UNIT = 100; // 月あたり積立額はこの単位で切り上げ
+  const TIGHT_BALANCE = 10000; // 引き落とし後の残りがこれ未満なら「残りわずか」
 
   function categoryLabel(id) {
     const c = TOTAL_CATEGORIES.find((x) => x.id === id);
@@ -413,6 +414,16 @@
   // ---- 口座・キャッシュフロー ----
 
   /** 口座ごとの表示行:現在残高、入金予定、引き落とし(未済)、引落後予想 */
+  /**
+   * 引き落とし後の残りの状態(画面の色分けに使う)
+   *  short:マイナス(不足)/ tight:引き落としがあり、残りが TIGHT_BALANCE 未満 / ok:足りる
+   */
+  function afterStatus(after, withdraw) {
+    if (after < 0) return 'short';
+    if (withdraw > 0 && after < TIGHT_BALANCE) return 'tight';
+    return 'ok';
+  }
+
   function accountRows(d, ym) {
     const p = d.payments;
     const wd = withdrawals(p, ym).map;
@@ -431,6 +442,7 @@
         withdraw: w.unpaid,
         withdrawAll: w.all,
         after: balance + incoming - w.unpaid,
+        status: afterStatus(balance + incoming - w.unpaid, w.unpaid),
         need: plan.need.get(a.itemId) || 0,
       };
     });
@@ -728,6 +740,8 @@
     MEMO_MAX,
     ALLOCATION_UNIT,
     SAVING_UNIT,
+    TIGHT_BALANCE,
+    afterStatus,
     categoryLabel,
     create,
     normalize,

@@ -25,6 +25,16 @@
 
   const yen = (v) => `${U.yen(v)}円`;
   const negCls = (v) => (v < 0 ? ' is-neg' : '');
+  // 色分け:入る・足りる=緑、出る・不足=赤、残りわずか=黄。色だけでなく符号や言葉も一緒に出す
+  const plusYen = (v) => (v > 0 ? `+${yen(v)}` : yen(v));
+  const minusYen = (v) => (v > 0 ? `${U.yenSigned(-v)}円` : yen(v));
+  const STATUS = {
+    short: { cls: 'is-neg', label: '不足' },
+    tight: { cls: 'is-warn-num', label: '残りわずか' },
+    ok: { cls: 'is-pos', label: '足りる' },
+  };
+  /** 引き落とし後の残りの状態の小さな札(足りる場合は出さない) */
+  const statusPill = (st, labels = {}) => (st === 'ok' ? null : h('span', { class: `status-pill is-${st}`, text: labels[st] || STATUS[st].label }));
 
   function head(container, active) {
     const p = store.get().payments;
@@ -159,16 +169,23 @@
       h(
         'div',
         { class: 'stat-grid' },
-        stat('確保している資金', cf.secured),
-        stat('残りの支払い(未済)', cf.remaining)
+        stat('確保している資金', cf.secured, 'tone-pos'),
+        stat('残りの支払い(未済)', cf.remaining, cf.remaining > 0 ? 'tone-neg' : 'tone-pos')
       ),
       h('p', { class: 'hint cf-breakdown', text: `確保している資金 = 口座残高 ${yen(cf.balances)} + 入金予定(未済)${yen(cf.pendingIncome)}` }),
-      h(
-        'div',
-        { class: 'cf-net' },
-        h('p', { class: 'summary-label', text: '差引予測残高' }),
-        h('p', { class: `summary-value${negCls(cf.net)}` }, U.yen(cf.net), h('span', { class: 'summary-unit', text: '円' }))
-      )
+      cfNet(cf)
+    );
+  }
+
+  /** 差引予測残高:足りる=緑、残りわずか=黄、不足=赤(札でも出す) */
+  function cfNet(cf) {
+    const st = P.afterStatus(cf.net, cf.remaining);
+    const labels = { ok: '足りる見込み', tight: '残りわずか', short: '不足の見込み' };
+    return h(
+      'div',
+      { class: `cf-net is-${st}` },
+      h('div', { class: 'cf-net-head' }, h('p', { class: 'summary-label', text: '差引予測残高' }), h('span', { class: `status-pill is-${st}`, text: labels[st] })),
+      h('p', { class: `summary-value ${STATUS[st].cls}` }, U.yen(cf.net), h('span', { class: 'summary-unit', text: '円' }))
     );
   }
 
@@ -223,8 +240,8 @@
               'button',
               {
                 type: 'button',
-                class: 'acct-row',
-                'aria-label': `${r.name} 現在残高 ${r.balance === null ? '未入力' : yen(r.balance)}、引落後予想 ${yen(r.after)}。タップして残高を更新`,
+                class: `acct-row is-${r.status}`,
+                'aria-label': `${r.name} 現在残高 ${r.balance === null ? '未入力' : yen(r.balance)}、引落後予想 ${yen(r.after)}(${STATUS[r.status].label})。タップして残高を更新`,
                 onClick: () => F.openBalanceSheet(r.itemId),
               },
               h(
@@ -237,10 +254,15 @@
               h(
                 'span',
                 { class: 'acct-flow' },
-                h('span', { text: `入金予定 +${U.yen(r.incoming)}` }),
-                h('span', { text: `引き落とし −${U.yen(r.withdraw)}` })
+                h('span', null, '入金予定 ', h('span', { class: r.incoming > 0 ? 'is-pos' : null, text: `+${U.yen(r.incoming)}` })),
+                h('span', null, '引き落とし ', h('span', { class: r.withdraw > 0 ? 'is-neg' : null, text: `−${U.yen(r.withdraw)}` }))
               ),
-              h('span', { class: 'acct-after' }, h('span', { text: '引落後予想' }), h('span', { class: `num${negCls(r.after)}`, text: yen(r.after) }))
+              h(
+                'span',
+                { class: 'acct-after' },
+                h('span', { class: 'acct-after-label' }, '引落後予想', statusPill(r.status)),
+                h('span', { class: `num ${STATUS[r.status].cls}`, text: yen(r.after) })
+              )
             )
           )
         )
@@ -321,7 +343,13 @@
           h('h2', { class: 'card-title', text: '今月の支払い' }),
           btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openBillSheet(null) })
         ),
-        h('div', { class: 'stat-grid stat-grid-3' }, stat('合計', t.total), stat('済', t.paid), stat('未済', t.unpaid))
+        h(
+          'div',
+          { class: 'stat-grid stat-grid-3' },
+          stat('合計', t.total),
+          stat('済', t.paid, t.paid > 0 ? 'tone-pos' : ''),
+          stat('未済', t.unpaid, t.unpaid > 0 ? 'tone-neg' : 'tone-pos')
+        )
       )
     );
 
@@ -546,7 +574,7 @@
             btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openIncomeSheet(null) })
           )
         ),
-        h('div', { class: 'stat-grid card-text' }, stat('合計', total), stat('未済', pending)),
+        h('div', { class: 'stat-grid card-text' }, stat('合計', total), stat('未済(これから入る)', pending, pending > 0 ? 'tone-pos' : '')),
         list
       ),
       sidejobNextCard(d, { compact: false }),
@@ -570,13 +598,23 @@
     return h(
       'section',
       { class: 'card' },
-      h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: `来月(${U.ymLabel(pv.target)})の副業の入金(予想)` }), h('span', { class: 'group-sum', text: yen(pv.total) })),
+      h(
+        'div',
+        { class: 'card-head' },
+        h('h2', { class: 'card-title', text: `来月(${U.ymLabel(pv.target)})の副業の入金(予想)` }),
+        h('span', { class: `group-sum${pv.total > 0 ? ' is-pos' : ''}`, text: plusYen(pv.total) })
+      ),
       pv.rows.length
         ? h(
             'ul',
             { class: 'need-list' },
             pv.rows.map((r) =>
-              h('li', null, h('span', { text: `${r.incomeName}(${r.sources.map((x) => `${x.clientName}:${U.monthLabel(x.workMonth)}に働いた分`).join('・')})` }), h('span', { text: yen(r.to) }))
+              h(
+                'li',
+                null,
+                h('span', { text: `${r.incomeName}(${r.sources.map((x) => `${x.clientName}:${U.monthLabel(x.workMonth)}に働いた分`).join('・')})` }),
+                h('span', { class: r.to > 0 ? 'is-pos' : null, text: plusYen(r.to) })
+              )
             )
           )
         : h('p', { class: 'hint', text: '入金予定と対応している依頼元がありません。' }),
@@ -624,7 +662,7 @@
           auto.length ? h('span', { class: 'chip chip-soft', text: `副業(${auto.map((c) => c.name).join('・')})から自動` }) : null,
           h('span', { text: i.targetId ? `優先:${P.accountName(d, i.targetId)}` : '振込先の指定なし' })
         ),
-        h('span', { class: `pay-amount${i.amount === null ? ' is-missing' : ''}`, text: i.amount === null ? '未入力' : yen(i.amount) })
+        h('span', { class: `pay-amount${i.amount === null ? ' is-missing' : i.amount > 0 ? ' is-in' : ''}`, text: i.amount === null ? '未入力' : plusYen(i.amount) })
       )
     );
   }
@@ -699,7 +737,7 @@
                 )
               )
             : h('p', { class: 'hint alloc-none', text: '振り分けなし' }),
-          h('p', { class: 'alloc-after' }, '入金後の引落後予想 ', h('span', { class: `num${negCls(r.after)}`, text: yen(r.after) }))
+          h('p', { class: 'alloc-after' }, '入金後の引落後予想 ', statusPill(r.status), h('span', { class: `num ${STATUS[r.status].cls}`, text: yen(r.after) }))
         )
       );
     }
@@ -710,7 +748,7 @@
     if (plan.unassigned.length) {
       extra.append(
         h('h3', { class: 'sp-title', text: 'どこにも振り分けていない入金' }),
-        h('ul', { class: 'need-list' }, plan.unassigned.map((u) => h('li', null, h('span', { text: u.income.name }), h('span', { text: yen(u.rest) }))))
+        h('ul', { class: 'need-list' }, plan.unassigned.map((u) => h('li', null, h('span', { text: u.income.name }), h('span', { class: 'is-pos', text: plusYen(u.rest) }))))
       );
     }
     for (const o of plan.over) extra.append(h('p', { class: 'field-error', text: `「${o.income.name}」の振り分けが入金額を ${yen(o.over)} 超えています。` }));
@@ -800,12 +838,19 @@
               h(
                 'button',
                 { type: 'button', class: 'hist-row', onClick: () => openHistorySheet(x.month) },
-                h('span', { class: 'hist-month', text: U.ymLabel(x.month) }),
+                h(
+                  'span',
+                  { class: 'hist-head' },
+                  h('span', { class: 'hist-month', text: U.ymLabel(x.month) }),
+                  x.income == null
+                    ? null
+                    : h('span', { class: `hist-net${x.income - x.payment < 0 ? ' is-neg' : ' is-pos'}` }, h('small', { text: '収支 ' }), `${U.yenSigned(x.income - x.payment)}`)
+                ),
                 h(
                   'span',
                   { class: 'hist-nums' },
-                  h('span', null, h('small', { text: '収入' }), x.income == null ? '—' : U.yen(x.income)),
-                  h('span', null, h('small', { text: '支払' }), U.yen(x.payment)),
+                  h('span', null, h('small', { text: '収入' }), x.income == null ? '—' : h('span', { class: x.income > 0 ? 'is-pos' : null, text: x.income > 0 ? `+${U.yen(x.income)}` : U.yen(x.income) })),
+                  h('span', null, h('small', { text: '支払' }), h('span', { class: x.payment > 0 ? 'is-neg' : null, text: x.payment > 0 ? U.yenSigned(-x.payment) : U.yen(x.payment) })),
                   h('span', null, h('small', { text: '月末残高' }), x.balance == null ? '—' : U.yen(x.balance))
                 )
               )
@@ -828,9 +873,9 @@
       h(
         'dl',
         { class: 'info-list' },
-        row('収入', x.income == null ? '未入力' : yen(x.income)),
-        row('支払', yen(x.payment)),
-        x.income == null ? row('差', '—') : row('差', `${U.yenSigned(x.income - x.payment)}円`, x.income - x.payment < 0 ? 'is-neg' : ''),
+        row('収入', x.income == null ? '未入力' : plusYen(x.income), x.income > 0 ? 'is-pos' : ''),
+        row('支払', minusYen(x.payment), x.payment > 0 ? 'is-neg' : ''),
+        x.income == null ? row('差', '—') : row('差', `${U.yenSigned(x.income - x.payment)}円`, x.income - x.payment < 0 ? 'is-neg' : x.income - x.payment > 0 ? 'is-pos' : ''),
         row('月末残高', x.balance == null ? '—' : yen(x.balance))
       ),
       h('h3', { class: 'form-section-title', text: 'カテゴリ別' }),
@@ -848,7 +893,7 @@
       x.incomeDetails.length
         ? [
             h('h3', { class: 'form-section-title', text: '入金の明細' }),
-            h('ul', { class: 'detail-list' }, x.incomeDetails.map((e) => h('li', null, h('span', { text: e.name }), h('span', { text: yen(e.amount) })))),
+            h('ul', { class: 'detail-list' }, x.incomeDetails.map((e) => h('li', null, h('span', { text: e.name }), h('span', { class: e.amount > 0 ? 'is-pos' : null, text: plusYen(e.amount) })))),
           ]
         : null
     );

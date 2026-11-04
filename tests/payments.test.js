@@ -367,3 +367,19 @@ test('未入力:請求額も内訳も空欄の支払いだけを「完全に未�
   P.toggleDone(p, 'bills', 'none');
   assert.deepEqual(P.warnings(d, YM).missingAmount.map((b) => b.id), ['subs']); // 済にしたものは出さない
 });
+
+test('引き落とし後の残りの状態:マイナスは不足、引き落としがあって 1 万円未満は残りわずか', () => {
+  assert.equal(P.afterStatus(-1, 5000), 'short');
+  assert.equal(P.afterStatus(0, 5000), 'tight');
+  assert.equal(P.afterStatus(P.TIGHT_BALANCE - 1, 1), 'tight');
+  assert.equal(P.afterStatus(P.TIGHT_BALANCE, 1), 'ok');
+  // 引き落としが無い口座は、残りが少なくても「足りる」
+  assert.equal(P.afterStatus(300, 0), 'ok');
+  assert.equal(P.afterStatus(-300, 0), 'short');
+  // 口座の行にも状態が入る
+  const { d, p, a } = fixture();
+  P.saveBill(p, { name: '支払いX', amount: 45000, dueDay: 27, accountId: a, category: 'fixed' }); // 残り 5,000 円
+  const rows = P.accountRows(d, YM);
+  for (const r of rows) assert.equal(r.status, P.afterStatus(r.after, r.withdraw));
+  assert.equal(rows.find((r) => r.itemId === a).status, 'tight');
+});

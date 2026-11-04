@@ -15,6 +15,11 @@
   const C = MT.charts;
   const F = MT.sidejobUI;
   const { h, add, icon, btn, toast, actionSheet } = MT.ui;
+  /** 依頼元ごとの色の点(カレンダーと同じ色。並び順で決まる) */
+  const cliMark = (data, id) => {
+    const i = data.clients.findIndex((c) => c.id === id);
+    return i >= 0 ? ` cli-mark cli-${i + 1}` : '';
+  };
 
   const SUBNAV = [
     { path: 'sidejob', label: '記録' },
@@ -60,7 +65,7 @@
     const chip = (cid, labelText) =>
       h('button', {
         type: 'button',
-        class: 'filter-chip',
+        class: `filter-chip${cid ? cliMark(data, cid) : ''}`,
         'aria-pressed': String(state.client === cid),
         text: labelText,
         onClick: () => {
@@ -109,13 +114,21 @@
             h(
               'div',
               { class: `kv${state.client && state.client !== c.id ? ' is-dim' : ''}` },
-              h('span', { class: 'kv-label', text: c.name }),
+              h('span', { class: `kv-label${cliMark(data, c.id)}`, text: c.name }),
               h('span', { class: 'kv-value', text: U.man(all.byClient.get(c.id) || 0) })
             )
           ),
           h('div', { class: 'kv kv-total' }, h('span', { class: 'kv-label', text: state.client ? `${S.clientName(data, state.client)}の合計` : '総合計' }), h('span', { class: 'kv-value', text: U.man(sum.total) }))
         ),
-        h('p', { class: 'hint', text: `入金確認済み ${U.man(sum.confirmed)}・未確認 ${U.man(sum.unconfirmed)}(${sum.count}件)` }),
+        h(
+          'p',
+          { class: 'hint' },
+          '入金確認済み ',
+          h('span', { class: sum.confirmed > 0 ? 'is-pos sum-strong' : 'sum-strong', text: U.man(sum.confirmed) }),
+          '・未確認 ',
+          h('span', { class: 'sum-strong', text: U.man(sum.unconfirmed) }),
+          `(${sum.count}件)`
+        ),
         h(
           'div',
           { class: 'button-row' },
@@ -169,7 +182,7 @@
       h(
         'button',
         { type: 'button', class: 'pay-main', onClick: () => F.openRecordSheet(r.id) },
-        h('span', { class: 'pay-name' }, U.dayLabel(r.date), state.client ? null : h('span', { class: 'chip chip-soft job-client', text: S.clientName(data, r.clientId) })),
+        h('span', { class: 'pay-name' }, U.dayLabel(r.date), state.client ? null : h('span', { class: `chip chip-soft job-client${cliMark(data, r.clientId)}`, text: S.clientName(data, r.clientId) })),
         h('span', { class: 'pay-meta' }, h('span', { class: 'job-content', text: r.content || '(内容なし)' }), r.memo ? h('span', { text: `メモ:${r.memo}` }) : null),
         h('span', { class: 'pay-amount', text: U.man(total) })
       ),
@@ -233,7 +246,7 @@
       { class: 'stat forecast' },
       h('span', { class: 'stat-label', text: `${labelText}(${U.ymLabel(ym)})` }),
       h('span', { class: 'stat-value' }, U.man(f.total, false), h('small', { text: '万' })),
-      h('span', { class: 'fc-line', text: `確認済み ${U.man(f.confirmed)}` }),
+      h('span', { class: `fc-line${f.confirmed > 0 ? ' is-pos' : ''}`, text: `確認済み ${U.man(f.confirmed)}` }),
       h('span', { class: 'fc-line is-planned', text: `予定 ${U.man(f.scheduled)}(未確認 ${U.man(f.unconfirmed)}・予定日 ${f.plannedDays}日)` })
     );
   }
@@ -507,7 +520,7 @@
                   h(
                     'button',
                     { type: 'button', class: 'pay-main', onClick: () => F.openClientSheet(c.id) },
-                    h('span', { class: 'pay-name', text: c.name }),
+                    h('span', { class: `pay-name${cliMark(data, c.id)}`, text: c.name }),
                     h(
                       'span',
                       { class: 'pay-meta' },
