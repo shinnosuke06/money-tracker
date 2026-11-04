@@ -18,7 +18,11 @@
  *   }],
  *   manual: [{ id, name, category, value, cost, updatedAt, sellPriority, memo }],
  *       // 手入力の資産。含み損益 = value − cost
- *   history: [{ date: "YYYY-MM-DD", total, gain, byBroker: { 名前: 円 }, missing }],
+ *   history: [{ date: "YYYY-MM-DD", total, gain, byBroker: { 名前: 円 }, missing, edited? }],
+ *       // edited: 手で直した記録なら true
+ *   historyTrash: [{ id, reason, at, entry }],
+ *       // 削除・修正前の履歴(新しい順・最大 200 件)。reason:deleted(削除)/ edited(修正前)/ replaced(置き換え前)
+ *       // entry は history の 1 件と同じ形。「元に戻す」で history に戻せる
  *   fx: { rate, source, at },         // 直近の更新で使った USD/JPY(auto / manual)
  *   lastUpdateAt,
  *   settings: { taxRate, fxManual, fxCode, reflect: { groupBy, map, manualMap } },
@@ -71,6 +75,12 @@
   const NAME_MAX = 40;
   const MEMO_MAX = 1000;
   const HISTORY_MAX = 2000;
+  const TRASH_MAX = 200;
+  const TRASH_REASONS = [
+    { id: 'deleted', label: '削除' },
+    { id: 'edited', label: '修正前' },
+    { id: 'replaced', label: '置き換え前' },
+  ];
 
   const label = (list, id) => (list.find((x) => x.id === id) || { label: id }).label;
   const isTaxable = (account) => !!(ACCOUNTS.find((a) => a.id === account) || {}).taxable;
@@ -80,6 +90,7 @@
       holdings: [],
       manual: [],
       history: [],
+      historyTrash: [],
       fx: { rate: null, source: null, at: null },
       lastUpdateAt: null,
       settings: { taxRate: DEFAULT_TAX, fxManual: null, fxCode: 'USDJPY', reflect: { groupBy: 'broker', map: {}, manualMap: {} } },
@@ -166,7 +177,13 @@
     if (e.byBroker && typeof e.byBroker === 'object') {
       for (const [k, v] of Object.entries(e.byBroker)) if (U.isYenValue(v)) byBroker[text(k)] = v;
     }
-    return { date: e.date, total: yenInt(e.total) || 0, gain: yenInt(e.gain), byBroker, missing: Number.isInteger(e.missing) && e.missing > 0 ? e.missing : 0 };
+    const out = { date: e.date, total: yenInt(e.total) || 0, gain: yenInt(e.gain), byBroker, missing: Number.isInteger(e.missing) && e.missing > 0 ? e.missing : 0 };
+    if (e.edited === true) out.edited = true;
+    return out;
+  }
+
+  function cleanTrash(t) {
+    return { id: id(t.id, 'hdel'), reason: oneOf(TRASH_REASONS, t.reason, 'deleted'), at: iso(t.at), entry: cleanHistoryEntry(t.entry) };
   }
 
   const list = (arr) => (Array.isArray(arr) ? arr : []).filter((x) => x && typeof x === 'object');
@@ -182,6 +199,11 @@
     const hist = new Map();
     for (const e of list(raw.history)) if (U.isDateStr(e.date)) hist.set(e.date, cleanHistoryEntry(e));
     a.history = [...hist.values()].sort((x, y) => (x.date < y.date ? -1 : 1)).slice(-HISTORY_MAX);
+    a.historyTrash = uniqueById(
+      list(raw.historyTrash)
+        .filter((t) => t.entry && typeof t.entry === 'object' && U.isDateStr(t.entry.date))
+        .map(cleanTrash)
+    ).slice(0, TRASH_MAX);
     const fx = raw.fx && typeof raw.fx === 'object' ? raw.fx : {};
     a.fx = { rate: num(fx.rate) || null, source: ['auto', 'manual'].includes(fx.source) ? fx.source : null, at: iso(fx.at) };
     a.lastUpdateAt = iso(raw.lastUpdateAt);
@@ -357,6 +379,105 @@
   function previousEntry(a, today) {
     for (let i = a.history.length - 1; i >= 0; i--) if (a.history[i].date < today) return a.history[i];
     return null;
+  }
+
+  // ---- 履歴を直す・削除・元に戻す ----
+
+  const byDate = (x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0);
+
+  /** 履歴 1 件を「削除・修正前の履歴」へ(新しいものを先頭に。多すぎたら古いものから消す) */
+  function toTrash(a, entry, reason, now) {
+    a.historyTrash.unshift({ id: U.uid('hdel'), reason, at: now.toISOString(), entry: cleanHistoryEntry(entry) });
+    if (a.historyTrash.length > TRASH_MAX) a.historyTrash.length = TRASH_MAX;
+  }
+
+  /**
+   * 履歴 1 件の日付と総資産を直す。直す前の記録は「削除・修正前の履歴」に残す(元に戻せる)
+   * @returns {{ok: true, changed: boolean, date: string} | {ok: false, error: string}}
+   */
+  function editHistory(a, date, draft, now = new Date()) {
+    const i = a.history.findIndex((e) => e.date === date);
+    if (i < 0) return { ok: false, error: 'その日の履歴が見つかりません。' };
+    const nextDate = draft.date;
+    const total = draft.total;
+    if (!U.isDateStr(nextDate)) return { ok: false, error: '日付を正しく入れてください。' };
+    if (nextDate > U.todayStr(now)) return { ok: false, error: '今日より先の日付にはできません。' };
+    if (!U.isYenValue(total) || total < 0) return { ok: false, error: '総資産は 0 円以上の金額で入れてください。' };
+    if (nextDate !== date && a.history.some((e) => e.date === nextDate)) {
+      return { ok: false, error: `${nextDate.replace(/-/g, '/')} の履歴がすでにあります。先にそちらを直すか、削除してください。` };
+    }
+    const old = a.history[i];
+    if (old.total === total && nextDate === date) return { ok: true, changed: false, date };
+    toTrash(a, old, 'edited', now);
+    a.history[i] = { ...old, date: nextDate, total, edited: true };
+    a.history.sort(byDate);
+    return { ok: true, changed: true, date: nextDate };
+  }
+
+  /** 履歴を削除する(「削除・修正前の履歴」へ移す)。消した件数を返す */
+  function removeHistory(a, dates, now = new Date()) {
+    const set = new Set([].concat(dates));
+    const removed = a.history.filter((e) => set.has(e.date));
+    for (const e of removed) toTrash(a, e, 'deleted', now);
+    a.history = a.history.filter((e) => !set.has(e.date));
+    return removed.length;
+  }
+
+  /**
+   * 「削除・修正前の履歴」の 1 件を履歴に戻す。
+   * 同じ日の履歴があるときは、replace: true のときだけ置き換える(今の記録は「置き換え前」として残す)
+   * @returns {{ok: true, date: string, replaced: boolean} | {ok: false, conflict?: object, error: string}}
+   */
+  function restoreHistory(a, trashId, { replace = false } = {}, now = new Date()) {
+    const k = a.historyTrash.findIndex((t) => t.id === trashId);
+    if (k < 0) return { ok: false, error: '戻す記録が見つかりません。' };
+    const t = a.historyTrash[k];
+    const j = a.history.findIndex((e) => e.date === t.entry.date);
+    if (j >= 0 && !replace) return { ok: false, conflict: a.history[j], error: 'その日の履歴がすでにあります。' };
+    a.historyTrash.splice(k, 1);
+    if (j >= 0) toTrash(a, a.history.splice(j, 1)[0], 'replaced', now);
+    a.history = a.history.concat({ ...t.entry }).sort(byDate).slice(-HISTORY_MAX);
+    return { ok: true, date: t.entry.date, replaced: j >= 0 };
+  }
+
+  /** 「削除・修正前の履歴」を完全に消す(trashId を省くと全部)。消した件数を返す */
+  function purgeTrash(a, trashId) {
+    const before = a.historyTrash.length;
+    a.historyTrash = trashId == null ? [] : a.historyTrash.filter((t) => t.id !== trashId);
+    return before - a.historyTrash.length;
+  }
+
+  const SPIKE = 0.15; // 前後の両方と 15% 以上ちがい、向きが逆(飛び出た・落ち込んだ)
+  const JUMP = 0.3; // 前回から 30% 以上の増減
+
+  /**
+   * 確かめたほうがよい履歴の目印。日付 → [{ id, text }]
+   *   spike:前後と比べて飛び出ている / 落ち込んでいる
+   *   jump:前回から急に増えた・減った(直前が spike のときは、元に戻っただけなので付けない)
+   *   missing:前回より価格未取得の銘柄が多い(取得の失敗で合計が小さくなった可能性)
+   *   zero:総資産が 0 円
+   */
+  function historyFlags(a) {
+    const hs = a.history;
+    const ratio = (from, to) => (from && from.total > 0 && to ? to.total / from.total - 1 : null);
+    const spikes = hs.map((e, i) => {
+      const r1 = ratio(hs[i - 1], e);
+      const r2 = ratio(e, hs[i + 1]);
+      return r1 !== null && r2 !== null && Math.abs(r1) >= SPIKE && Math.abs(r2) >= SPIKE && Math.sign(r1) !== Math.sign(r2) ? r1 : null;
+    });
+    const out = new Map();
+    hs.forEach((e, i) => {
+      const f = [];
+      const prev = hs[i - 1];
+      const r1 = ratio(prev, e);
+      const pctText = (r) => `${r > 0 ? '+' : '−'}${Math.round(Math.abs(r) * 100)}%`;
+      if (e.total === 0) f.push({ id: 'zero', text: '総資産が 0 円' });
+      else if (spikes[i] !== null) f.push({ id: 'spike', text: spikes[i] > 0 ? `前後より高い(${pctText(spikes[i])})` : `前後より低い(${pctText(spikes[i])})` });
+      else if (r1 !== null && Math.abs(r1) >= JUMP && spikes[i - 1] == null) f.push({ id: 'jump', text: `前回から急に${r1 > 0 ? '増加' : '減少'}(${pctText(r1)})` });
+      if (prev && e.missing > prev.missing) f.push({ id: 'missing', text: `価格未取得が前回より多い(${e.missing}件)` });
+      if (f.length) out.set(e.date, f);
+    });
+    return out;
   }
 
   // ---- 書き換え ----
@@ -674,6 +795,12 @@
       d.schemaVersion = 3;
       return d;
     });
+    // v9 → v10:資産の履歴を直す・削除・元に戻す(削除・修正前の履歴を入れる場所を足す。今の履歴はそのまま)
+    MT.store.addMigration(9, (d) => {
+      if (d.assets && typeof d.assets === 'object' && !Array.isArray(d.assets.historyTrash)) d.assets.historyTrash = [];
+      d.schemaVersion = 10;
+      return d;
+    });
   }
 
   MT.assetsModel = {
@@ -707,6 +834,13 @@
     brokers,
     saveHistory,
     previousEntry,
+    editHistory,
+    removeHistory,
+    restoreHistory,
+    purgeTrash,
+    historyFlags,
+    TRASH_REASONS,
+    TRASH_MAX,
     saveHolding,
     saveManual,
     removeHolding,

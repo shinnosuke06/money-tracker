@@ -54,11 +54,17 @@
     });
   }
 
-  /** 総資産の推移(日付ごと) */
-  function history(slot, canvas, fallback, entries) {
+  /**
+   * 総資産の推移(日付ごと。直近 120 件)
+   * @param {{marks?: Set<string>, onPick?: (date: string) => void}} opts
+   *   marks:目印を付ける日付(赤い点)/ onPick:点を押したとき(その日の日付を渡す)
+   */
+  function history(slot, canvas, fallback, entries, opts = {}) {
+    const marks = opts.marks || new Set();
     C.mount(slot, canvas, fallback, (c) => {
       const pts = entries.slice(-120);
       const many = pts.length > 40;
+      const marked = pts.map((e) => marks.has(e.date));
       const labels = pts.map((e, i) => {
         const [y, m, d] = e.date.split('-').map(Number);
         return i === 0 || (m === 1 && d <= 7) ? [`${m}/${d}`, `${y}`] : `${m}/${d}`;
@@ -74,8 +80,9 @@
               borderColor: c.series[0],
               backgroundColor: c.series[0],
               borderWidth: 2,
-              pointRadius: many ? 0 : 4,
-              pointHoverRadius: 5,
+              pointRadius: marked.map((m) => (m ? 5 : many ? 0 : 4)),
+              pointHoverRadius: marked.map((m) => (m ? 6 : 5)),
+              pointBackgroundColor: marked.map((m) => (m ? c.negative : c.series[0])),
               pointBorderColor: c.surface,
               pointBorderWidth: 2,
               tension: 0,
@@ -88,11 +95,16 @@
           maintainAspectRatio: false,
           animation: false,
           interaction: { mode: 'index', intersect: false },
+          onClick: opts.onPick
+            ? (evt, elements) => {
+                if (elements.length) opts.onPick(pts[elements[0].index].date);
+              }
+            : undefined,
           plugins: {
             legend: { display: false },
             tooltip: C.tooltip(c, {
               title: (items) => (items.length ? pts[items[0].dataIndex].date.replace(/-/g, '/') : ''),
-              label: (item) => ` 総資産: ${U.yen(item.raw)}円`,
+              label: (item) => ` 総資産: ${U.yen(item.raw)}円${marked[item.dataIndex] ? '(要確認)' : ''}`,
             }),
           },
           scales: { ...C.scales(c), y: { ...C.scales(c).y, beginAtZero: false } },
