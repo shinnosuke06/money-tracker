@@ -378,6 +378,23 @@
     return m.id;
   }
 
+  /** 保有の並べ替え(同じ証券会社の中など、ids に入っている銘柄だけを並べ直す) */
+  function reorderHoldings(a, ids) {
+    a.holdings = U.reorderSubset(a.holdings, ids);
+  }
+
+  /** 証券会社の並べ替え(証券会社ごとにまとめ、中の順番はそのまま) */
+  function reorderBrokers(a, brokers) {
+    const rank = new Map((Array.isArray(brokers) ? brokers : []).map((b, i) => [b, i]));
+    const at = (x) => (rank.has(x.broker) ? rank.get(x.broker) : rank.size);
+    a.holdings = [...a.holdings].sort((x, y) => at(x) - at(y));
+  }
+
+  /** 手入力の資産の並べ替え */
+  function reorderManual(a, ids) {
+    a.manual = U.reorderSubset(a.manual, ids);
+  }
+
   function removeHolding(a, hid) {
     a.holdings = a.holdings.filter((h) => h.id !== hid);
   }
@@ -660,6 +677,9 @@
   }
 
   MT.assetsModel = {
+    reorderHoldings,
+    reorderBrokers,
+    reorderManual,
     ACCOUNTS,
     TYPES,
     MANUAL_CATEGORIES,

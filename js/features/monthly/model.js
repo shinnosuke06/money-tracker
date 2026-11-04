@@ -281,13 +281,6 @@
     r.memo = String(memo == null ? '' : memo).slice(0, MEMO_MAX);
   }
 
-  function moveInArray(arr, from, to) {
-    if (from < 0 || to < 0 || from >= arr.length || to >= arr.length) return false;
-    const [x] = arr.splice(from, 1);
-    arr.splice(to, 0, x);
-    return true;
-  }
-
   function addCategory(m, name) {
     const c = { id: U.uid('cat'), name: cleanName(name) || '新しい区分' };
     m.categories.push(c);
@@ -302,7 +295,7 @@
   /** dir: -1 で上へ、+1 で下へ */
   function moveCategory(m, id, dir) {
     const i = m.categories.findIndex((c) => c.id === id);
-    return i >= 0 && moveInArray(m.categories, i, i + dir);
+    return i >= 0 && U.moveInArray(m.categories, i, i + dir);
   }
 
   /** 区分を削除する。中の項目と、その金額もすべて消える */

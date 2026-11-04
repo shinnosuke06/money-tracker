@@ -315,7 +315,7 @@ test('v5 のデータを開くと v6 になり、副業の予定は見込み(pla
   v5.schemaVersion = 5;
   const res = store.prepare(JSON.parse(JSON.stringify(v5)));
   assert.equal(res.ok, true);
-  assert.equal(res.data.schemaVersion, 6);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION); // v6 を通って最新の版まで上がる
   assert.deepEqual(res.data.sidejob.schedule['2026-11'].A, { off: ['2026-11-02'], extra: ['2026-11-04'], plans: {} });
 });
 

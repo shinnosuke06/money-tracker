@@ -56,6 +56,7 @@
     back: '<path d="M14.5 5.5L8 12l6.5 6.5"/>',
     up: '<path d="M6.5 14.5L12 9l5.5 5.5"/>',
     down: '<path d="M6.5 9.5L12 15l5.5-5.5"/>',
+    grip: '<path d="M5.5 8h13M5.5 12h13M5.5 16h13"/>',
     more: '<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>',
     download: '<path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14"/>',
     upload: '<path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 19.5h14"/>',

@@ -1,13 +1,13 @@
 /*
  * 入力フォームの共通部品(どの機能のダイアログでも使う)
  *   selectEl / segmented / ymPicker / monthChips / multiChips / choicePicker / checkbox / textInput /
- *   memoArea / dateInput / field / formFoot / errorLine / confirmDelete
+ *   memoArea / dateInput / field / formFoot / errorLine / confirmDelete / openReorderSheet / moveButtons
  */
 (function (root) {
   'use strict';
   const MT = root.MT;
   const U = MT.util;
-  const { h, add, btn, confirmDialog } = MT.ui;
+  const { h, add, btn, icon, openSheet, confirmDialog } = MT.ui;
 
   function selectEl(options, value, attrs = {}) {
     const sel = h('select', { class: 'field-select', ...attrs });
@@ -196,5 +196,232 @@
     });
   }
 
-  MT.forms = { selectEl, segmented, ymPicker, monthChips, multiChips, choicePicker, dateInput, checkbox, textInput, memoArea, field, formFoot, errorLine, confirmDelete };
+  /**
+   * フォームの中の行(内訳・作業項目など)を上下に動かす ↑↓ ボタン。
+   * 行の要素を入れ替え、順番の配列(rows)も同じように入れ替える。保存するときは rows の順に読む
+   * @param {Array<{el: HTMLElement}>} rows
+   * @param {{el: HTMLElement}} row
+   * @param {string} label 読み上げ用の名前(例:内訳)
+   */
+  function moveButtons(rows, row, label) {
+    const go = (dir, btnEl) => {
+      const i = rows.indexOf(row);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= rows.length) return;
+      const other = rows[j];
+      if (dir < 0) other.el.before(row.el);
+      else other.el.after(row.el);
+      rows[i] = other;
+      rows[j] = row;
+      btnEl.focus({ preventScroll: true });
+      row.el.scrollIntoView({ block: 'nearest' });
+    };
+    const up = h('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': `${label}を上へ` }, icon('up'));
+    const down = h('button', { type: 'button', class: 'icon-btn icon-btn-sm', 'aria-label': `${label}を下へ` }, icon('down'));
+    up.addEventListener('click', () => go(-1, up));
+    down.addEventListener('click', () => go(1, down));
+    return [up, down];
+  }
+
+  /**
+   * 並べ替えのダイアログ。左のつまみを上下にドラッグするか、↑↓ で 1 つずつ動かし、「保存」で決める。
+   * @param {object} o
+   * @param {string} o.title
+   * @param {string} [o.description] 説明(ドラッグの使い方の後ろに足す)
+   * @param {Array<{id: string, label: string, sub?: string}>} o.items いまの順番(ほかのキーがあっても良い)
+   * @param {Array<{id: string, label: string, sort: Function}>} [o.presets] 「〜順に並べる」ボタン。sort(items) は並べた配列を返す
+   * @param {(ids: string[], preset: string|null) => void} o.onSave 順番が変わったとき・並べ方のボタンを使ったとき。
+   *   preset は最後に押した並べ方のボタンの id(そのあと手で動かしたら null)
+   */
+  function openReorderSheet({ title, description = '', items, presets = [], onSave }) {
+    const s = openSheet({
+      title,
+      description: ['左のつまみ(≡)を上下にドラッグするか、↑↓ で動かします。', description].filter(Boolean).join(''),
+      className: 'sheet-reorder',
+    });
+    const byId = new Map(items.map((x) => [String(x.id), x]));
+    const rowsById = new Map();
+    const list = h('ul', { class: 'reorder-list' });
+    let preset = null;
+    let drag = null;
+
+    const ids = () => [...list.children].map((li) => li.dataset.id);
+
+    function refresh() {
+      const lis = [...list.children];
+      lis.forEach((li, i) => {
+        li.querySelector('.rb-up').disabled = i === 0;
+        li.querySelector('.rb-down').disabled = i === lis.length - 1;
+      });
+    }
+
+    function step(li, dir, btnEl) {
+      const other = dir < 0 ? li.previousElementSibling : li.nextElementSibling;
+      if (!other) return;
+      if (dir < 0) other.before(li);
+      else other.after(li);
+      preset = null;
+      refresh();
+      // 端に着いて押せなくなったら、反対のボタンへ
+      const target = btnEl.disabled ? li.querySelector(dir < 0 ? '.rb-down' : '.rb-up') : btnEl;
+      target.focus({ preventScroll: true });
+      li.scrollIntoView({ block: 'nearest' });
+    }
+
+    // ---- ドラッグ(ダイアログ全体がスクロールするので、端に近づいたら自動で送る) ----
+    const scroller = s.panel;
+    function offset() {
+      return drag.y - drag.startY + (scroller.scrollTop - drag.scroll0);
+    }
+    function place() {
+      const { li } = drag;
+      li.style.transform = `translateY(${offset()}px)`;
+      // 隣の行の真ん中を越えたら入れ替える(速く動かしたときのため、越えなくなるまで繰り返す)
+      for (let guard = 0; guard < 200; guard++) {
+        const r = li.getBoundingClientRect();
+        const mid = r.top + r.height / 2;
+        const prev = li.previousElementSibling;
+        const next = li.nextElementSibling;
+        let swap = null;
+        if (prev) {
+          const pr = prev.getBoundingClientRect();
+          if (mid < pr.top + pr.height / 2) swap = () => prev.before(li);
+        }
+        if (!swap && next) {
+          const nr = next.getBoundingClientRect();
+          if (mid > nr.top + nr.height / 2) swap = () => next.after(li);
+        }
+        if (!swap) break;
+        const before = li.offsetTop;
+        swap();
+        drag.startY += li.offsetTop - before; // 並びが変わった分だけずらし、指の下に残す
+        drag.moved = true;
+        li.style.transform = `translateY(${offset()}px)`;
+      }
+    }
+    function tick() {
+      if (!drag) return;
+      const r = scroller.getBoundingClientRect();
+      const edge = 56;
+      let v = 0;
+      if (drag.y < r.top + edge) v = -Math.ceil((r.top + edge - drag.y) / 5);
+      else if (drag.y > r.bottom - edge) v = Math.ceil((drag.y - (r.bottom - edge)) / 5);
+      if (v) {
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + v;
+        if (scroller.scrollTop !== before) place();
+      }
+      drag.raf = root.requestAnimationFrame(tick);
+    }
+    function onMove(e) {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      e.preventDefault();
+      drag.y = e.clientY;
+      place();
+    }
+    function endDrag(e) {
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      const { li, handle, moved } = drag;
+      root.cancelAnimationFrame(drag.raf);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', endDrag);
+      handle.removeEventListener('pointercancel', endDrag);
+      li.style.transform = '';
+      li.classList.remove('is-dragging');
+      list.classList.remove('is-sorting');
+      drag = null;
+      if (moved) preset = null;
+      refresh();
+    }
+    function startDrag(e, li) {
+      if (drag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      e.preventDefault();
+      const handle = e.currentTarget;
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch (err) {
+        /* 取れなくても動かせる */
+      }
+      drag = { li, handle, pointerId: e.pointerId, startY: e.clientY, y: e.clientY, scroll0: scroller.scrollTop, raf: 0, moved: false };
+      li.classList.add('is-dragging');
+      list.classList.add('is-sorting');
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', endDrag);
+      handle.addEventListener('pointercancel', endDrag);
+      drag.raf = root.requestAnimationFrame(tick);
+    }
+
+    for (const x of items) {
+      const name = String(x.label);
+      const handle = h('span', { class: 'reorder-handle', 'aria-hidden': 'true' }, icon('grip'));
+      const up = h('button', { type: 'button', class: 'icon-btn rb-up', 'aria-label': `「${name}」を上へ` }, icon('up'));
+      const down = h('button', { type: 'button', class: 'icon-btn rb-down', 'aria-label': `「${name}」を下へ` }, icon('down'));
+      const li = h(
+        'li',
+        { class: 'reorder-row', 'data-id': String(x.id) },
+        handle,
+        h('span', { class: 'reorder-text' }, h('span', { class: 'reorder-name', text: name }), x.sub ? h('small', { class: 'reorder-sub', text: x.sub }) : null),
+        up,
+        down
+      );
+      handle.addEventListener('pointerdown', (e) => startDrag(e, li));
+      up.addEventListener('click', () => step(li, -1, up));
+      down.addEventListener('click', () => step(li, 1, down));
+      rowsById.set(String(x.id), li);
+      list.append(li);
+    }
+    refresh();
+
+    const presetRow = presets.length
+      ? h(
+          'div',
+          { class: 'button-row reorder-presets' },
+          presets.map((pr) =>
+            btn(pr.label, {
+              size: 'small',
+              onClick: () => {
+                for (const x of pr.sort(ids().map((id) => byId.get(id)))) list.append(rowsById.get(String(x.id)));
+                preset = pr.id;
+                refresh();
+                MT.ui.toast(`${pr.label.replace(/に並べる$/, '')}に並べました(保存で決まります)`);
+              },
+            })
+          )
+        )
+      : null;
+    add(s.body, presetRow, list);
+
+    const before = items.map((x) => String(x.id)).join('\n');
+    s.foot.append(
+      btn('キャンセル', { onClick: () => s.close() }),
+      btn('保存', {
+        variant: 'primary',
+        onClick: () => {
+          const now = ids();
+          s.close();
+          if (now.join('\n') !== before || preset) onSave(now, preset);
+        },
+      })
+    );
+    return s;
+  }
+
+  MT.forms = {
+    selectEl,
+    segmented,
+    ymPicker,
+    monthChips,
+    multiChips,
+    choicePicker,
+    dateInput,
+    checkbox,
+    textInput,
+    memoArea,
+    field,
+    formFoot,
+    errorLine,
+    confirmDelete,
+    openReorderSheet,
+    moveButtons,
+  };
 })(window);

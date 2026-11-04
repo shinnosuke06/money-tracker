@@ -333,12 +333,43 @@
       h(
         'section',
         { class: 'card card-flush' },
-        h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: '支払い・ローン' }), h('span', { class: 'hint', text: '引き落とし日順' })),
+        h(
+          'div',
+          { class: 'card-head' },
+          h('h2', { class: 'card-title', text: '支払い・ローン' }),
+          h(
+            'div',
+            { class: 'card-head-side' },
+            h('span', { class: 'hint', text: p.billOrder === 'manual' ? '並べた順' : '引き落とし日順' }),
+            bills.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderBillsFlow }) : null
+          )
+        ),
         list,
         endedSection(d, ym)
       ),
       specialsCard(d, ym)
     );
+  }
+
+  /** 支払いの並べ替え(引き落とし日順に戻すこともできる) */
+  function reorderBillsFlow() {
+    const d = store.get();
+    const p = d.payments;
+    const day = (x) => (x.dueDay == null ? 99 : x.dueDay);
+    MT.forms.openReorderSheet({
+      title: '支払いの並べ替え',
+      description: '並べた順は、概要や口座ごとの引き落としにも使います。「引き落とし日順に並べる」で保存すると、追加や日付の変更のたびに自動で日付順になります。',
+      items: P.activeBills(p, p.month).map((b) => ({
+        id: b.id,
+        label: b.name,
+        dueDay: b.dueDay,
+        sub: [b.dueDay ? `${b.dueDay}日` : '引き落とし日なし', P.categoryLabel(b.category), b.accountId ? P.accountName(d, b.accountId) : '口座なし'].join('・'),
+      })),
+      presets: [{ id: 'due', label: '引き落とし日順に並べる', sort: (items) => [...items].sort((a, b) => day(a) - day(b)) }],
+      onSave: (ids, preset) => {
+        if (store.update((dd) => P.reorderBills(dd.payments, ids, preset))) toast(preset === 'due' ? '引き落とし日順にしました' : '並べ替えました');
+      },
+    });
   }
 
   function billRow(d, b, ym) {
@@ -508,7 +539,12 @@
           'div',
           { class: 'card-head' },
           h('h2', { class: 'card-title', text: '入金予定' }),
-          btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openIncomeSheet(null) })
+          h(
+            'div',
+            { class: 'card-head-side' },
+            p.incomes.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderIncomesFlow }) : null,
+            btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openIncomeSheet(null) })
+          )
         ),
         h('div', { class: 'stat-grid card-text' }, stat('合計', total), stat('未済', pending)),
         list
@@ -556,6 +592,19 @@
           ]
         : null
     );
+  }
+
+  /** 入金予定の並べ替え(振り分けの自動の提案は、この順に入金を使う) */
+  function reorderIncomesFlow() {
+    const p = store.get().payments;
+    MT.forms.openReorderSheet({
+      title: '入金予定の並べ替え',
+      description: '振り分けの自動の提案は、上にある入金から順に使います(優先振込先のある入金が先)。',
+      items: p.incomes.map((i) => ({ id: i.id, label: i.name, sub: i.amount === null ? '金額未入力' : `${U.yen(i.amount)}円` })),
+      onSave: (ids) => {
+        if (store.update((dd) => P.reorderIncomes(dd.payments, ids))) toast('並べ替えました');
+      },
+    });
   }
 
   function incomeRow(d, i) {

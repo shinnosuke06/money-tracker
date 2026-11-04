@@ -18,7 +18,7 @@
   // 小さな部品
   // ---------------------------------------------------------------
 
-  const { selectEl, segmented, ymPicker, checkbox, textInput, field, formFoot, errorLine, confirmDelete } = MT.forms;
+  const { selectEl, segmented, ymPicker, checkbox, textInput, field, formFoot, errorLine, confirmDelete, moveButtons } = MT.forms;
   const memoArea = (value) => MT.forms.memoArea(value, P.MEMO_MAX);
 
   /** 口座の選択(口座なし + 支払いで使う口座) */
@@ -109,7 +109,7 @@
       row.el = h(
         'div',
         { class: `sub-row${ended ? ' is-ended' : ''}` },
-        h('div', { class: 'sub-row-top' }, row.name, remove),
+        h('div', { class: 'sub-row-top' }, row.name, ...moveButtons(subRows, row, '内訳'), remove),
         h('div', { class: 'sub-row-mid' }, row.amount.el, row.cat),
         ended ? h('p', { class: 'form-hint', text: `終了月(${U.ymLabel(sub.endMonth)})を過ぎているため、計算には入りません` }) : null,
         h(

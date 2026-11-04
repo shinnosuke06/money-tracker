@@ -15,16 +15,17 @@
  *   v3 → v4:ポケカ在庫(inventory)と副業収入(sidejob)を追加(js/features/inventory/model.js)
  *   v4 → v5:月末記録の参考行と、Excel の取り込みの履歴(imports)を追加(js/features/monthly/model.js)
  *   v5 → v6:副業の追加で出る日に、依頼元ごとの見込み(基本額・作業項目)を追加(js/features/sidejob/model.js)
+ *   v6 → v7:支払いの並び(引き落とし日順 / 自分で並べた順)を追加(js/features/payments/model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 6;
+  const SCHEMA_VERSION = 7;
   // アプリの版。設定に出し、新しい版の確認(js/core/update.js)にも使う。
   // 変更を出すたびに上げ、index.html の各ファイルの ?v= も同じ値にそろえる(テストで確かめる)
-  const APP_VERSION = '2026.11.03-4';
+  const APP_VERSION = '2026.11.04-1';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

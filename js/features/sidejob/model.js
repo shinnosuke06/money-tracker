@@ -341,6 +341,11 @@
   }
 
   /** 依頼元を消す(その依頼元の記録と予定も消える) */
+  /** 依頼元の並べ替え(カレンダーの色もこの順で決まる) */
+  function reorderClients(sj, ids) {
+    sj.clients = U.reorderSubset(sj.clients, ids);
+  }
+
   function removeClient(sj, cid) {
     sj.clients = sj.clients.filter((c) => c.id !== cid);
     sj.records = sj.records.filter((r) => r.clientId !== cid);
@@ -489,6 +494,7 @@
   }
 
   MT.sidejobModel = {
+    reorderClients,
     MAX_CLIENTS,
     NAME_MAX,
     create,

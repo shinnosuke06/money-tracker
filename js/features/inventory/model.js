@@ -228,6 +228,11 @@
     return { ok: true, merged: true, id: target.id };
   }
 
+  /** 商品の並べ替え */
+  function reorderItems(inv, ids) {
+    inv.items = U.reorderSubset(inv.items, ids);
+  }
+
   function removeItem(inv, iid) {
     inv.items = inv.items.filter((x) => x.id !== iid);
   }
@@ -310,6 +315,7 @@
   }
 
   MT.inventoryModel = {
+    reorderItems,
     PRIORITIES,
     NAME_MAX,
     label,

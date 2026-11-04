@@ -10,7 +10,7 @@
   const S = MT.sidejobModel;
   const store = MT.store;
   const { h, add, icon, btn, openSheet, confirmDialog, toast, amountField } = MT.ui;
-  const { selectEl, segmented, multiChips, dateInput, textInput, field, formFoot, errorLine } = MT.forms;
+  const { selectEl, segmented, multiChips, dateInput, textInput, field, formFoot, errorLine, moveButtons } = MT.forms;
 
   const sj = () => store.get().sidejob;
   const manYen = (v) => `${U.man(v)}(${U.yen(v)}円)`;
@@ -165,7 +165,7 @@
     const name = textInput(src ? draft.name : '', { maxlength: S.NAME_MAX, placeholder: '例:依頼元A', 'aria-label': '依頼元の名前' });
     const base = amountField({ value: draft.baseAmount, label: '基本額', compact: true });
     const taskBox = h('div', { class: 'task-list' });
-    let taskRows = [];
+    const taskRows = [];
     function addTaskRow(t) {
       const row = { id: t.id || U.uid('tsk') };
       row.name = textInput(t.name, { class: 'field-input field-sm', maxlength: S.NAME_MAX, placeholder: '作業項目の名前', 'aria-label': '作業項目の名前' });
@@ -174,7 +174,13 @@
       row.el = h(
         'div',
         { class: 'sub-row' },
-        h('div', { class: 'sub-row-top' }, row.name, h('button', { type: 'button', class: 'icon-btn', 'aria-label': '作業項目を削除', onClick: () => { taskRows = taskRows.filter((x) => x !== row); row.el.remove(); } }, icon('close'))),
+        h(
+          'div',
+          { class: 'sub-row-top' },
+          row.name,
+          ...moveButtons(taskRows, row, '作業項目'),
+          h('button', { type: 'button', class: 'icon-btn', 'aria-label': '作業項目を削除', onClick: () => { taskRows.splice(taskRows.indexOf(row), 1); row.el.remove(); } }, icon('close'))
+        ),
         h('div', { class: 'sub-row-mid' }, row.amount.el, h('label', { class: 'check check-inline' }, row.def, h('span', { text: '既定で選ぶ' })))
       );
       taskRows.push(row);

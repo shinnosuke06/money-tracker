@@ -463,6 +463,19 @@
   // 依頼元
   // ---------------------------------------------------------------
 
+  /** 依頼元の並べ替え(絞り込みのボタンやカレンダーの色もこの順) */
+  function reorderClientsFlow() {
+    const data = store.get().sidejob;
+    MT.forms.openReorderSheet({
+      title: '依頼元の並べ替え',
+      description: '絞り込みのボタンや、カレンダーの依頼元ごとの色も、この順番で決まります。',
+      items: data.clients.map((c) => ({ id: c.id, label: c.name, sub: `基本額 ${U.man(c.baseAmount)}` })),
+      onSave: (ids) => {
+        if (store.update((d) => S.reorderClients(d.sidejob, ids))) toast('並べ替えました');
+      },
+    });
+  }
+
   function renderClients(container) {
     const d = store.get();
     const data = d.sidejob;
@@ -475,7 +488,12 @@
           'div',
           { class: 'card-head' },
           h('h2', { class: 'card-title', text: `依頼元(${data.clients.length}/${S.MAX_CLIENTS})` }),
-          data.clients.length < S.MAX_CLIENTS ? btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openClientSheet(null) }) : null
+          h(
+            'div',
+            { class: 'card-head-side' },
+            data.clients.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderClientsFlow }) : null,
+            data.clients.length < S.MAX_CLIENTS ? btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openClientSheet(null) }) : null
+          )
         ),
         h(
           'ul',

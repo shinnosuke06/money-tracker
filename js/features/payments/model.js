@@ -10,7 +10,8 @@
  *             subItems: [{ id, name, amount, category, endMonth, memo }] }],
  *       // 支払い・ローン。amount=請求額(null は未入力)、dueDay=引き落とし日(1〜31)
  *       // category: loan / fixed / variable / investment、endMonth を過ぎると非表示
- *   incomes: [{ id, name, amount, fixed, targetId, done, memo }],   // 入金予定。targetId=優先振込先
+ *   billOrder: "due"|"manual", // 支払いの並び。due=引き落とし日順(自動)、manual=bills の配列の順(並べ替えで決めた順)
+ *   incomes: [{ id, name, amount, fixed, targetId, done, memo }],   // 入金予定。targetId=優先振込先。配列の順が表示順
  *   specials: [{ id, name, amount, month, accountId, done, memo }], // 特別支出(支払月 month)
  *   allocation: { mode: "auto"|"manual", items: [{ incomeId, accountId, amount }] },
  *       // 振り分け。auto のときは毎回計算し直す。手で直すと manual になる
@@ -57,6 +58,7 @@
       month: U.currentYM(now),
       accounts: [],
       bills: [],
+      billOrder: 'due',
       incomes: [],
       specials: [],
       allocation: { mode: 'auto', items: [] },
@@ -175,6 +177,7 @@
     }
     const list = (arr) => (Array.isArray(arr) ? arr : []).filter((x) => x && typeof x === 'object');
     p.bills = uniqueById(list(raw.bills).map(cleanBill));
+    p.billOrder = raw.billOrder === 'manual' ? 'manual' : 'due';
     p.incomes = uniqueById(list(raw.incomes).map(cleanIncome));
     p.specials = uniqueById(list(raw.specials).map(cleanSpecial));
     const alloc = raw.allocation && typeof raw.allocation === 'object' ? raw.allocation : {};
@@ -228,8 +231,10 @@
     return it ? it.name : '(口座なし)';
   }
 
+  /** 表示する支払い(終了月を過ぎたものは除く)。並びは billOrder に従う */
   function activeBills(p, ym) {
-    return p.bills.filter((b) => isActive(b.endMonth, ym)).sort(byDueDay);
+    const list = p.bills.filter((b) => isActive(b.endMonth, ym));
+    return p.billOrder === 'manual' ? list : list.sort(byDueDay);
   }
 
   function endedBills(p, ym) {
@@ -541,7 +546,36 @@
   }
 
   function saveBill(p, draft) {
-    return upsert(p.bills, cleanBill(draft));
+    const bill = cleanBill(draft);
+    // 自分で並べた順のときは、新しい支払いを引き落とし日の位置に入れる(日付順のときは表示で並ぶ)
+    if (p.billOrder === 'manual' && !p.bills.some((x) => x.id === bill.id)) {
+      const day = (b) => (b.dueDay == null ? 99 : b.dueDay);
+      const at = p.bills.findIndex((x) => day(x) > day(bill));
+      if (at >= 0) {
+        p.bills.splice(at, 0, bill);
+        return bill.id;
+      }
+    }
+    return upsert(p.bills, bill);
+  }
+
+  /**
+   * 支払いの並べ替え。ids は表示している支払いの新しい順番(終了した支払いの位置は変えない)。
+   * preset が "due" なら引き落とし日順(自動)に戻す
+   */
+  function reorderBills(p, ids, preset = null) {
+    if (preset === 'due') {
+      p.billOrder = 'due';
+      p.bills = [...p.bills].sort(byDueDay);
+      return;
+    }
+    p.bills = U.reorderSubset(p.bills, ids);
+    p.billOrder = 'manual';
+  }
+
+  /** 入金予定の並べ替え(振り分けの自動の提案は、この順に入金を使う) */
+  function reorderIncomes(p, ids) {
+    p.incomes = U.reorderSubset(p.incomes, ids);
   }
   function saveIncome(p, draft) {
     return upsert(p.incomes, cleanIncome(draft));
@@ -677,6 +711,12 @@
       d.schemaVersion = 2;
       return d;
     });
+    // v6 → v7:支払いの並び(billOrder)を追加。これまでどおり引き落とし日順で始める
+    MT.store.addMigration(6, (d) => {
+      if (d.payments && typeof d.payments === 'object') d.payments.billOrder = 'due';
+      d.schemaVersion = 7;
+      return d;
+    });
   }
 
   MT.paymentsModel = {
@@ -726,6 +766,8 @@
     setAccountKind,
     setBalance,
     saveBill,
+    reorderBills,
+    reorderIncomes,
     saveIncome,
     saveSpecial,
     removeById,

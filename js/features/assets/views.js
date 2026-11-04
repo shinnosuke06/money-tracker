@@ -214,6 +214,48 @@
   // 保有
   // ---------------------------------------------------------------
 
+  /** 保有の並べ替え:証券会社の並びか、証券会社の中の銘柄の並びを選ぶ */
+  function reorderHoldingsFlow() {
+    const a = store.get().assets;
+    const brokers = [...new Set(a.holdings.map((x) => x.broker))];
+    const inBroker = (broker) => a.holdings.filter((x) => x.broker === broker);
+    const holdingsSheet = (broker) =>
+      MT.forms.openReorderSheet({
+        title: `${broker}の銘柄の並べ替え`,
+        items: inBroker(broker).map((x) => ({ id: x.id, label: x.name, sub: [x.code, A.label(A.ACCOUNTS, x.account)].filter(Boolean).join('・') })),
+        onSave: (ids) => {
+          if (store.update((d) => A.reorderHoldings(d.assets, ids))) toast('並べ替えました');
+        },
+      });
+    const brokersSheet = () =>
+      MT.forms.openReorderSheet({
+        title: '証券会社の並べ替え',
+        description: '資産の画面の証券会社の順番が変わります(中の銘柄の順番はそのまま)。',
+        items: brokers.map((b) => ({ id: b, label: b, sub: `${inBroker(b).length}件` })),
+        onSave: (ids) => {
+          if (store.update((d) => A.reorderBrokers(d.assets, ids))) toast('並べ替えました');
+        },
+      });
+    if (brokers.length === 1) return holdingsSheet(brokers[0]);
+    const many = brokers.filter((b) => inBroker(b).length > 1);
+    if (!many.length) return brokersSheet();
+    return MT.ui.actionSheet({
+      title: '何を並べ替えますか?',
+      actions: [{ label: '証券会社の並び', onSelect: brokersSheet }, ...many.map((b) => ({ label: `${b}の銘柄の並び`, onSelect: () => holdingsSheet(b) }))],
+    });
+  }
+
+  function reorderManualFlow() {
+    const a = store.get().assets;
+    MT.forms.openReorderSheet({
+      title: '手入力の資産の並べ替え',
+      items: a.manual.map((m) => ({ id: m.id, label: m.name, sub: `${U.yen(m.value)}円` })),
+      onSave: (ids) => {
+        if (store.update((d) => A.reorderManual(d.assets, ids))) toast('並べ替えました');
+      },
+    });
+  }
+
   function renderHoldings(container) {
     const a = store.get().assets;
     head(container, 'assets/holdings');
@@ -230,7 +272,13 @@
         ),
         h('div', { class: 'stat-grid' }, stat('評価額', s.securities.value), stat('評価損益', s.securities.gain, true)),
         s.securities.missing ? h('p', { class: 'field-error', text: `価格未取得 ${s.securities.missing}件(合計に入っていません)` }) : null,
-        h('div', { class: 'button-row' }, updateButton(), btn('まとめて貼り付け', { size: 'small', onClick: F.openPasteSheet }))
+        h(
+          'div',
+          { class: 'button-row' },
+          updateButton(),
+          btn('まとめて貼り付け', { size: 'small', onClick: F.openPasteSheet }),
+          a.holdings.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderHoldingsFlow }) : null
+        )
       )
     );
     const groups = new Map();
@@ -325,7 +373,12 @@
           'div',
           { class: 'card-head' },
           h('h2', { class: 'card-title', text: `手入力の資産(${a.manual.length}件)` }),
-          btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openManualSheet(null) })
+          h(
+            'div',
+            { class: 'card-head-side' },
+            a.manual.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderManualFlow }) : null,
+            btn('追加', { icon: 'plus', variant: 'primary', size: 'small', onClick: () => F.openManualSheet(null) })
+          )
         ),
         h('div', { class: 'stat-grid card-text' }, stat('評価額', total), stat('含み損益', gain, true)),
         h('p', { class: 'card-text hint', text: 'ポイント運用、ウォレット、金、コレクションなど、価格を自動で取れない資産です。評価額か含み損益のどちらかを入れると、もう片方を計算します。' }),

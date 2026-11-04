@@ -330,7 +330,34 @@
     },
   };
 
+  /**
+   * 並べ替え:ids に入っている要素だけを ids の順に並べ直す。それ以外の要素は元の位置のまま。
+   * (表示している一部だけ・同じグループの中だけを並べ替えるときにも使える)
+   * @param {Array<object>} arr
+   * @param {string[]} ids 並べたい順の id
+   * @param {string} [key] id のキー
+   * @returns {Array<object>} 新しい配列(arr は変えない)
+   */
+  function reorderSubset(arr, ids, key = 'id') {
+    const wanted = [...new Set((Array.isArray(ids) ? ids : []).map(String))];
+    const byId = new Map(arr.map((x) => [String(x[key]), x]));
+    const picked = wanted.filter((id) => byId.has(id)).map((id) => byId.get(id));
+    const set = new Set(picked);
+    let i = 0;
+    return arr.map((x) => (set.has(x) ? picked[i++] : x));
+  }
+
+  /** 配列の from 番目を to 番目へ動かす(arr を変える)。動かせたら true */
+  function moveInArray(arr, from, to) {
+    if (from < 0 || from >= arr.length || to < 0 || to >= arr.length || from === to) return false;
+    const [x] = arr.splice(from, 1);
+    arr.splice(to, 0, x);
+    return true;
+  }
+
   MT.util = {
+    reorderSubset,
+    moveInArray,
     todayStr,
     currentYM,
     isYM,

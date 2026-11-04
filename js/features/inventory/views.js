@@ -9,7 +9,7 @@
   const I = MT.inventoryModel;
   const store = MT.store;
   const F = MT.inventoryUI;
-  const { h, icon, btn } = MT.ui;
+  const { h, icon, btn, toast } = MT.ui;
 
   const yen = (v) => `${U.yen(v)}円`;
   const signed = (v) => `${U.yenSigned(v)}円`;
@@ -17,6 +17,17 @@
 
   function kv(labelText, value, cls = '') {
     return h('div', { class: 'kv' }, h('span', { class: 'kv-label', text: labelText }), h('span', { class: `kv-value${cls}`, text: value }));
+  }
+
+  function reorderFlow() {
+    const inv = store.get().inventory;
+    MT.forms.openReorderSheet({
+      title: '在庫の並べ替え',
+      items: inv.items.map((x) => ({ id: x.id, label: x.name, sub: `${x.quantity}個` })),
+      onSave: (ids) => {
+        if (store.update((d) => I.reorderItems(d.inventory, ids))) toast('並べ替えました');
+      },
+    });
   }
 
   function render(container) {
@@ -78,7 +89,12 @@
       h(
         'section',
         { class: 'card card-flush' },
-        h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: `在庫の一覧(${s.rows.length}商品)` })),
+        h(
+          'div',
+          { class: 'card-head' },
+          h('h2', { class: 'card-title', text: `在庫の一覧(${s.rows.length}商品)` }),
+          s.rows.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderFlow }) : null
+        ),
         h('ul', { class: 'pay-list inv-list' }, s.rows.map(row))
       )
     );
