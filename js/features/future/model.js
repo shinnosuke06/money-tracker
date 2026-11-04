@@ -72,6 +72,14 @@
     { id: 'payments', label: '支払い管理の口座の現在残高' },
     { id: 'manual', label: '手で入力' },
   ];
+  // 取り崩しの方式:不足分だけ(現金が生活防衛資金を下回る月に補う)/ 定額 / 定率
+  const DRAW_METHODS = [
+    { id: 'shortfall', label: '不足分だけ' },
+    { id: 'fixed', label: '定額(毎月◯円)' },
+    { id: 'rate', label: '定率(年初の残高の◯%)' },
+  ];
+  const DRAW_DEFAULTS = { fixedMonthly: 100000, ratePercent: 4 }; // 仮の値(画面に「仮」と出す)
+  const PRIORITY_RANK = { first: 0, ifNeeded: 1, keep: 2 };
   const DEFAULTS = { years: 40, inflation: 0, returns: { low: 1, mid: 3, high: 5 }, tax: { taxable: 20.315, nisa: 0 }, reserveMonths: 6 };
   const MAX_PLANS = 10;
   const MAX_ROWS = 100;
@@ -182,6 +190,29 @@
     };
   }
 
+  /** 取り崩しの設定 */
+  function cleanDrawdown(x) {
+    const src = x && typeof x === 'object' ? x : {};
+    const targets = {};
+    if (src.targets && typeof src.targets === 'object') {
+      for (const [k, v] of Object.entries(src.targets)) if (typeof v === 'boolean' && k.length <= 80) targets[k] = v;
+    }
+    const order = Array.isArray(src.order) ? [...new Set(src.order.filter((k) => typeof k === 'string' && k && k.length <= 80))].slice(0, MAX_ASSETS + MAX_ROWS + 1) : null;
+    return {
+      method: oneOf(DRAW_METHODS, src.method, 'shortfall'),
+      topUp: src.topUp !== false, // 定額・定率のうえで、足りなければ不足分も補う
+      fixedMonthly: yen(src.fixedMonthly, DRAW_DEFAULTS.fixedMonthly),
+      ratePercent: num(src.ratePercent, 0, 100, DRAW_DEFAULTS.ratePercent),
+      fromAge: intOrNull(src.fromAge, 0, 120), // 定額・定率の期間(この年齢のあいだ)。外は「不足分だけ」
+      toAge: intOrNull(src.toAge, 0, 120),
+      yearlyCap: yenOrNull(src.yearlyCap), // 1 年(暦年)あたりの売る額の上限
+      cashCap: yenOrNull(src.cashCap), // 現金の上限
+      reinvest: src.reinvest === true, // 上限を超えた現金を投資に戻す
+      order: order && order.length ? order : null, // 取り崩す順(キー)。null は既定(最初に売る → 足りなければ売る)
+      targets, // 取り崩しの対象のオン/オフ(キー → true/false)。無ければ「売りたくない」以外はオン
+    };
+  }
+
   function cleanPlan(raw = {}, now = new Date()) {
     const r = raw.returns && typeof raw.returns === 'object' ? raw.returns : {};
     const t = raw.tax && typeof raw.tax === 'object' ? raw.tax : {};
@@ -215,6 +246,7 @@
       oneTime: rows(raw.oneTime, cleanOneTime),
       yearly: rows(raw.yearly, cleanYearly),
       assets: rows(raw.assets, cleanAsset, MAX_ASSETS),
+      drawdown: cleanDrawdown(raw.drawdown),
     };
   }
 
@@ -286,6 +318,11 @@
     // 行の id も新しくする(別のプランとして直せるように)
     for (const k of LIST_KEYS) for (const row of rowsOf(copy, k)) row.id = null;
     const p = cleanPlan(copy);
+    // 取り崩しの対象・順番のキー(資産・積立の id)を、新しい id に付け替える
+    const keyMap = new Map([...src.assets.map((a, i) => [`a:${a.id}`, `a:${p.assets[i].id}`]), ...src.savings.map((x, i) => [`s:${x.id}`, `s:${p.savings[i].id}`])]);
+    const mapKey = (k) => keyMap.get(k) || k;
+    p.drawdown.order = src.drawdown.order ? src.drawdown.order.map(mapKey) : null;
+    p.drawdown.targets = Object.fromEntries(Object.entries(src.drawdown.targets).map(([k, v]) => [mapKey(k), v]));
     f.plans.splice(f.plans.indexOf(src) + 1, 0, p);
     f.activeId = p.id;
     fixRefs(f);
@@ -344,6 +381,13 @@
     if (row && 'enabled' in row) row.enabled = !row.enabled;
   }
 
+  /** 取り崩しの設定を直す(order・targets も含む) */
+  function updateDrawdown(f, id, patch) {
+    const i = f.plans.findIndex((p) => p.id === id);
+    if (i < 0) return;
+    f.plans[i].drawdown = cleanDrawdown({ ...f.plans[i].drawdown, ...patch });
+  }
+
   /** 基本の条件など、行でない値をまとめて直す(cleanPlan を通す) */
   function updatePlan(f, id, patch) {
     const i = f.plans.findIndex((p) => p.id === id);
@@ -393,27 +437,71 @@
   const monthlyRate = (annual) => Math.pow(1 + annual / 100, 1 / 12) - 1;
 
   /**
+   * 取り崩しの対象と順番。既定は「最初に売る → 足りなければ売る → 売りたくない」(同じ優先度は一覧の順:資産 → 積立分 → 現金から戻した分)、
+   * 「売りたくない」はオフ。順番やオン/オフを変えたときは drawdown.order / targets に入る(知らないキーは既定の位置で後ろに足す)
+   * @returns {{ key, name, priority, taxKind, kind, value, on }[]}
+   */
+  function drawItems(plan) {
+    const items = [
+      ...plan.assets.map((a) => ({ key: `a:${a.id}`, name: a.name, priority: a.priority, taxKind: a.taxKind, kind: 'asset', group: a.group, value: a.value })),
+      ...plan.savings.map((x) => ({ key: `s:${x.id}`, name: `${x.name}(積立分)`, priority: x.priority, taxKind: x.taxKind, kind: 'saving', group: 'saving', value: 0 })),
+      ...(plan.drawdown.reinvest ? [{ key: 'r:cash', name: '現金から戻した分', priority: 'ifNeeded', taxKind: 'taxable', kind: 'reinvest', group: 'reinvest', value: 0 }] : []),
+    ];
+    let ordered = items
+      .map((x, i) => ({ x, i }))
+      .sort((a, b) => PRIORITY_RANK[a.x.priority] - PRIORITY_RANK[b.x.priority] || a.i - b.i)
+      .map((o) => o.x);
+    const ord = plan.drawdown.order;
+    if (ord) {
+      const pos = new Map(ord.map((k, i) => [k, i]));
+      ordered = [...ordered.filter((x) => pos.has(x.key)).sort((a, b) => pos.get(a.key) - pos.get(b.key)), ...ordered.filter((x) => !pos.has(x.key))];
+    }
+    const t = plan.drawdown.targets;
+    return ordered.map((x) => ({ ...x, on: x.key in t ? t[x.key] : x.priority !== 'keep' }));
+  }
+
+  /**
    * 1 本の利回りで、期間の月ごとに計算する。
+   * 毎月の順番:収入・支出 → 投資を増やして積立を足す → 定額・定率の取り崩し → 不足分の取り崩し → 現金の上限を超えた分を投資へ
    * @param {object} plan
    * @param {number} annualRate 投資の年利(%)
-   * @returns {{ months: object[], years: object[], summary: object }}
+   * @returns {{ months: object[], years: object[], summary: object, buckets: object[] }}
    */
   function simulate(plan, annualRate) {
     const rm = monthlyRate(annualRate);
+    const dd = plan.drawdown;
     const taxRate = (b) => (b.taxKind === 'taxable' ? plan.tax.taxable : b.taxKind === 'nisa' ? plan.tax.nisa : 0) / 100;
     const buckets = [
-      ...plan.assets.map((a) => ({ key: `a:${a.id}`, name: a.name, group: a.group, value: a.value, cost: Math.min(a.cost, Number.MAX_SAFE_INTEGER), grows: a.grows, taxKind: a.taxKind, priority: a.priority })),
-      ...plan.savings.map((s) => ({ key: `s:${s.id}`, savingId: s.id, name: `${s.name}(積立分)`, group: 'saving', value: 0, cost: 0, grows: true, taxKind: s.taxKind, priority: s.priority })),
+      ...plan.assets.map((a) => ({ key: `a:${a.id}`, name: a.name, group: a.group, value: a.value, cost: a.cost, grows: a.grows, taxKind: a.taxKind, priority: a.priority })),
+      ...plan.savings.map((x) => ({ key: `s:${x.id}`, savingId: x.id, name: `${x.name}(積立分)`, group: 'saving', value: 0, cost: 0, grows: true, taxKind: x.taxKind, priority: x.priority })),
+      { key: 'r:cash', name: '現金から戻した分', group: 'reinvest', value: 0, cost: 0, grows: true, taxKind: 'taxable', priority: 'ifNeeded' },
     ];
-    const sellOrder = [...buckets.filter((b) => b.priority === 'first'), ...buckets.filter((b) => b.priority === 'ifNeeded')];
+    const byKey = new Map(buckets.map((b) => [b.key, b]));
+    const sellOrder = drawItems(plan)
+      .filter((x) => x.on)
+      .map((x) => byKey.get(x.key))
+      .filter(Boolean);
+    const sellable = () => sellOrder.reduce((t, b) => t + b.value, 0);
+    const reinvestBucket = byKey.get('r:cash');
     const total = plan.years * 12;
     let cash = plan.cash;
+    let capYear = null;
+    let capUsed = 0;
+    let rateMonthly = 0;
     const months = [];
 
     for (let k = 0; k < total; k++) {
       const ym = U.ymAdd(plan.startYM, k);
       const age = ageAt(plan, ym);
       const infl = Math.pow(1 + plan.inflation / 100, k / 12);
+      const cashBefore = cash;
+      const year = Number(ym.slice(0, 4));
+      if (capYear !== year) {
+        capYear = year;
+        capUsed = 0;
+        // 定率:年初(計算の最初の月か 1 月の、増える前)の取り崩しの対象の残高 × 率 ÷ 12 を、その年の毎月
+        rateMonthly = Math.round((sellable() * dd.ratePercent) / 100 / 12);
+      }
 
       // 収入(内訳も残す:収入の行・副業・返済・臨時収入)
       const parts = { work: 0, sidejob: 0, repay: 0, extra: 0 };
@@ -446,29 +534,69 @@
       // 投資:月初の残高を増やしてから、積立を足す
       for (const b of buckets) if (b.grows && b.value > 0 && rm !== 0) b.value = Math.max(0, Math.round(b.value * (1 + rm)));
       for (const r of contrib) {
-        const b = buckets.find((x) => x.savingId === r.id);
+        const b = byKey.get(`s:${r.id}`);
         b.value += r.monthly;
         b.cost += r.monthly;
       }
 
-      // 取り崩し
+      // ---- 取り崩し ----
       const reserve = plan.reserve.amount !== null ? plan.reserve.amount : Math.round(plan.reserve.months * living);
+      const capLeft = () => (dd.yearlyCap === null ? Infinity : Math.max(0, dd.yearlyCap - capUsed));
       const sales = [];
-      if (cash < reserve) {
+      const active = dd.method !== 'shortfall' && inAge(age, dd.fromAge, dd.toAge);
+      let paused = false;
+      if (active) {
+        let left = dd.method === 'fixed' ? dd.fixedMonthly : rateMonthly;
+        // 現金が上限以上の月は、定額・定率の取り崩しを休む
+        if (dd.cashCap !== null && cash >= dd.cashCap && left > 0) {
+          left = 0;
+          paused = true;
+        }
+        left = Math.min(left, capLeft());
+        for (const b of sellOrder) {
+          if (left <= 0) break;
+          const sl = takeGross(b, left, taxRate(b));
+          if (!sl) continue;
+          sl.kind = 'plan';
+          sales.push(sl);
+          cash += sl.net;
+          left -= sl.gross;
+          capUsed += sl.gross;
+        }
+      }
+      let capBlocked = 0;
+      if ((dd.method === 'shortfall' || !active || dd.topUp) && cash < reserve) {
         let need = reserve - cash;
         for (const b of sellOrder) {
           if (need <= 0) break;
-          const s = sell(b, need, taxRate(b));
-          if (!s) continue;
-          sales.push(s);
-          cash += s.net;
-          need -= s.net;
+          const cl = capLeft();
+          if (cl <= 0) break;
+          const sl = sell(b, need, taxRate(b), cl);
+          if (!sl) continue;
+          sl.kind = 'need';
+          sales.push(sl);
+          cash += sl.net;
+          need -= sl.net;
+          capUsed += sl.gross;
         }
+        // 上限のために取り崩せなかった額(売れる資産は残っている)
+        if (need > 0 && capLeft() <= 0 && sellable() > 0) capBlocked = need;
       }
+      // 現金の上限:超えた分を投資に戻す
+      let reinvested = 0;
+      if (dd.cashCap !== null && dd.reinvest && cash > dd.cashCap) {
+        reinvested = cash - dd.cashCap;
+        reinvestBucket.value += reinvested;
+        reinvestBucket.cost += reinvested;
+        cash -= reinvested;
+      }
+
       const invest = buckets.reduce((t, b) => t + b.value, 0);
+      const net = (kind) => sales.filter((x) => x.kind === kind).reduce((t, x) => t + x.net, 0);
       months.push({
         ym,
         age,
+        cashBefore,
         income,
         incomeParts: parts,
         living,
@@ -480,13 +608,21 @@
         flow: income - expense - oneTime,
         reserve,
         sales,
-        drawGross: sales.reduce((t, s) => t + s.gross, 0),
-        drawTax: sales.reduce((t, s) => t + s.tax, 0),
-        drawNet: sales.reduce((t, s) => t + s.net, 0),
+        drawGross: sales.reduce((t, x) => t + x.gross, 0),
+        drawTax: sales.reduce((t, x) => t + x.tax, 0),
+        drawNet: sales.reduce((t, x) => t + x.net, 0),
+        drawPlanNet: net('plan'),
+        drawNeedNet: net('need'),
+        capBlocked,
+        paused,
+        reinvested,
+        drawable: sellable(),
         cash,
         invest,
         total: cash + invest,
-        short: cash < 0,
+        // 資金不足:取り崩しても現金がマイナス、または 1 年の上限のために必要な取り崩しができない月
+        short: cash < 0 || capBlocked > 0,
+        shortReason: cash < 0 ? (capBlocked > 0 ? 'cap' : 'cash') : capBlocked > 0 ? 'cap' : null,
         below: cash < reserve,
       });
     }
@@ -494,50 +630,65 @@
     return { months, years, summary: summaryOf(months), buckets };
   }
 
+  /** 1 つの資産を、売る額(評価額)gross だけ売る(足りなければ全部)。税 = 売る額 × 含み益の割合 × 税率 */
+  function takeGross(b, gross, rate) {
+    const g = Math.min(gross, b.value);
+    if (g <= 0) return null;
+    const gainRatio = b.value > b.cost ? (b.value - b.cost) / b.value : 0;
+    const tax = Math.round(g * gainRatio * rate);
+    const costOut = Math.round((b.cost * g) / b.value);
+    b.value -= g;
+    b.cost = b.value === 0 ? 0 : Math.max(0, b.cost - costOut);
+    return { key: b.key, name: b.name, group: b.group, priority: b.priority, taxKind: b.taxKind, gross: g, tax, net: g - tax };
+  }
+
   /**
-   * 1 つの資産から、手取りで need 円になるように売る(足りなければ全部売る)。
-   * 税 = 売った額 × 含み益の割合((評価額 − 取得額)÷ 評価額)× 税率。取得額は売った割合だけ減らす。
+   * 1 つの資産から、手取りで need 円になるように売る(足りなければ全部、maxGross を超えない)。
+   * 売る額 = need ÷(1 − 含み益の割合 × 税率)を切り上げ。取得額は売った割合だけ減らす。
    */
-  function sell(b, need, rate) {
-    if (b.value <= 0 || need <= 0) return null;
+  function sell(b, need, rate, maxGross = Infinity) {
+    if (b.value <= 0 || need <= 0 || maxGross <= 0) return null;
     const gainRatio = b.value > b.cost ? (b.value - b.cost) / b.value : 0;
     const keep = 1 - gainRatio * rate; // 1 円売ったときの手取り
-    let gross = keep > 0 ? Math.ceil(need / keep) : b.value;
-    if (gross > b.value) gross = b.value;
-    const tax = Math.round(gross * gainRatio * rate);
-    const costOut = Math.round((b.cost * gross) / b.value);
-    b.value -= gross;
-    b.cost = b.value === 0 ? 0 : Math.max(0, b.cost - costOut);
-    return { key: b.key, name: b.name, group: b.group, priority: b.priority, taxKind: b.taxKind, gross, tax, net: gross - tax };
+    const gross = Math.min(keep > 0 ? Math.ceil(need / keep) : b.value, b.value, maxGross);
+    return takeGross(b, gross, rate);
   }
 
   /** 月ごとの結果を、暦の年ごとにまとめる(最初と最後の年は一部の月だけのことがある) */
   function toYears(months) {
     const out = [];
+    const SUM = ['income', 'living', 'loans', 'saving', 'yearly', 'oneTime', 'expense', 'flow', 'drawGross', 'drawTax', 'drawNet', 'drawPlanNet', 'drawNeedNet', 'capBlocked', 'reinvested'];
     let cur = null;
     for (const m of months) {
       const year = Number(m.ym.slice(0, 4));
       if (!cur || cur.year !== year) {
-        cur = { year, fromYM: m.ym, toYM: m.ym, count: 0, income: 0, living: 0, loans: 0, saving: 0, yearly: 0, oneTime: 0, expense: 0, flow: 0, drawGross: 0, drawTax: 0, drawNet: 0, sales: [], shortYM: null, belowYM: null };
+        cur = { year, fromYM: m.ym, toYM: m.ym, count: 0, cashStart: m.cashBefore, incomeParts: { work: 0, sidejob: 0, repay: 0, extra: 0 }, sales: [], shortYM: null, shortReason: null, belowYM: null, pausedMonths: 0 };
+        for (const k of SUM) cur[k] = 0;
         out.push(cur);
       }
       cur.count++;
       cur.toYM = m.ym;
-      for (const k of ['income', 'living', 'loans', 'saving', 'yearly', 'oneTime', 'expense', 'flow', 'drawGross', 'drawTax', 'drawNet']) cur[k] += m[k];
-      for (const s of m.sales) {
-        const ex = cur.sales.find((x) => x.key === s.key);
+      for (const k of SUM) cur[k] += m[k];
+      for (const k of Object.keys(cur.incomeParts)) cur.incomeParts[k] += m.incomeParts[k];
+      for (const sl of m.sales) {
+        const ex = cur.sales.find((x) => x.key === sl.key);
         if (ex) {
-          ex.gross += s.gross;
-          ex.tax += s.tax;
-          ex.net += s.net;
-        } else cur.sales.push({ ...s });
+          ex.gross += sl.gross;
+          ex.tax += sl.tax;
+          ex.net += sl.net;
+        } else cur.sales.push({ key: sl.key, name: sl.name, group: sl.group, priority: sl.priority, taxKind: sl.taxKind, gross: sl.gross, tax: sl.tax, net: sl.net });
       }
-      if (m.short && !cur.shortYM) cur.shortYM = m.ym;
+      if (m.short && !cur.shortYM) {
+        cur.shortYM = m.ym;
+        cur.shortReason = m.shortReason;
+      }
       if (m.below && !cur.belowYM) cur.belowYM = m.ym;
+      if (m.paused) cur.pausedMonths++;
       cur.age = m.age;
       cur.cash = m.cash;
       cur.invest = m.invest;
       cur.total = m.total;
+      cur.drawable = m.drawable;
     }
     return out;
   }
@@ -546,14 +697,18 @@
     const last = months[months.length - 1];
     const firstShort = months.find((m) => m.short);
     const firstBelow = months.find((m) => m.below);
+    const firstCap = months.find((m) => m.capBlocked > 0);
     return {
       firstShortYM: firstShort ? firstShort.ym : null,
+      firstShortReason: firstShort ? firstShort.shortReason : null,
       firstBelowYM: firstBelow ? firstBelow.ym : null,
+      firstCapYM: firstCap ? firstCap.ym : null,
       endYM: last ? last.ym : null,
       endTotal: last ? last.total : 0,
       endCash: last ? last.cash : 0,
       endInvest: last ? last.invest : 0,
       drawNet: months.reduce((t, m) => t + m.drawNet, 0),
+      capBlocked: months.reduce((t, m) => t + m.capBlocked, 0),
     };
   }
 
@@ -625,7 +780,154 @@
     const noEnd = plan.loans.filter((l) => !l.endYM);
     if (noEnd.length) out.push(`終了年月が未入力のローンがあります(${noEnd.map((l) => l.name).join('、')})。期間の終わりまで払う計算です。`);
     if (!plan.living.monthly) out.push('毎月の生活費が 0 円です。「生活費」で入れてください。');
+    const dd = plan.drawdown;
+    if (dd.method !== 'shortfall' && (dd.fromAge !== null || dd.toAge !== null) && !plan.birthYM) out.push('取り崩しの期間(年齢)を使うには、生年月(または今の年齢)が必要です。いまは定額・定率の取り崩しが行われません。');
+    const items = drawItems(plan);
+    if (items.length && !items.some((x) => x.on)) out.push('取り崩しの対象がすべてオフです。現金が足りなくなっても、投資からは補いません。');
     return out;
+  }
+
+  // ---- 原因の見える化 ----
+
+  /**
+   * 資金不足が最初に出る年の内訳と、前の年との比べ・考えられる理由
+   * @returns {null | { year, prev, month, rows: [label, prev, cur][], reasons: string[] }}
+   */
+  function shortageCause(plan, result) {
+    const ys = result.years;
+    const i = ys.findIndex((y) => y.shortYM);
+    if (i < 0) return null;
+    const y = ys[i];
+    const prev = i > 0 ? ys[i - 1] : null;
+    const m = result.months.find((x) => x.ym === y.shortYM);
+    const rows = [
+      ['年初の現金', 'cashStart'],
+      ['収入', 'income'],
+      ['生活費', 'living'],
+      ['ローン', 'loans'],
+      ['積立', 'saving'],
+      ['毎年の費用', 'yearly'],
+      ['単発の出費', 'oneTime'],
+      ['取り崩し(手取り)', 'drawNet'],
+      ['上限で取り崩せなかった額', 'capBlocked'],
+      ['年末の現金', 'cash'],
+      ['年末の取り崩せる資産', 'drawable'],
+    ].map(([label, key]) => ({ label, key, prev: prev ? prev[key] : null, cur: y[key] }));
+    const comparable = prev && prev.count === 12 && y.count === 12;
+    const reasons = [];
+    const yenText = (v) => `${U.yen(v)}円`;
+    if (m && m.shortReason === 'cap') reasons.push(`1年あたりの取り崩しの上限(${yenText(plan.drawdown.yearlyCap)})に届いたため、必要な分を取り崩せません。`);
+    if (m && m.drawable === 0) reasons.push('取り崩せる資産がなくなりました(「売りたくない」や、取り崩しの対象からオフにした資産は使いません)。');
+    if (plan.drawdown.method !== 'shortfall' && !plan.drawdown.topUp) reasons.push('定額・定率だけで取り崩し、不足分を補わない設定です。');
+    if (comparable) {
+      const d = (key) => y[key] - prev[key];
+      if (d('income') < 0) reasons.push(`収入が前の年より ${yenText(-d('income'))} 減っています(働き方や年金の切り替わりなど)。`);
+      if (d('living') > 0) reasons.push(`生活費が前の年より ${yenText(d('living'))} 増えています。`);
+      if (d('loans') > 0) reasons.push(`ローンが前の年より ${yenText(d('loans'))} 増えています。`);
+      if (d('yearly') > 0) reasons.push(`毎年の費用が前の年より ${yenText(d('yearly'))} 多くかかります。`);
+    }
+    if (y.oneTime > 0) {
+      const names = plan.oneTime.filter((r) => r.enabled && r.ym.startsWith(String(y.year))).map((r) => r.name);
+      reasons.push(`この年に単発の出費(${names.join('・') || '—'})が ${yenText(y.oneTime)} あります。`);
+    }
+    if (!reasons.length) reasons.push('収入より支出が多い状態が続き、現金と取り崩せる資産を使い切りました。');
+    return { year: y, prev, month: m, rows, comparable, reasons };
+  }
+
+  /** 「ちょっと変えたら」の動かせる項目(一時的に動かすだけで、保存はしない) */
+  const TWEAKS = [
+    { id: 'living', label: '生活費', unit: '%', min: -30, max: 30, step: 5 },
+    { id: 'workEnd', label: '収入の終わり(働く期間)', unit: '年', min: -5, max: 5, step: 1 },
+    { id: 'saving', label: '積立額', unit: '%', min: -100, max: 100, step: 10 },
+    { id: 'rate', label: '利回り', unit: 'ポイント', min: -3, max: 3, step: 0.5 },
+  ];
+
+  /**
+   * 条件を少し変えたプランを作る(元のプランは変えない)
+   *  living:生活費を ±% / workEnd:年齢の終わりがある収入の終わりを ± 年(続けて始まる収入も同じだけずらす。年金など終わりの無いものは動かさない)
+   *  saving:積立額を ±% / rate:利回り(3 パターンとも)を ± ポイント
+   */
+  function applyTweaks(plan, t = {}) {
+    const p = JSON.parse(JSON.stringify(plan));
+    const f = (pct) => 1 + (pct || 0) / 100;
+    if (t.living) {
+      p.living.monthly = Math.round(p.living.monthly * f(t.living));
+      for (const c of p.living.changes) c.monthly = Math.round(c.monthly * f(t.living));
+    }
+    if (t.workEnd) {
+      const ends = new Set(plan.incomes.filter((r) => r.toAge !== null).map((r) => r.toAge));
+      p.incomes = plan.incomes.map((r) => {
+        if (r.toAge === null) return { ...r };
+        const from = r.fromAge !== null && ends.has(r.fromAge - 1) ? r.fromAge + t.workEnd : r.fromAge;
+        return { ...r, fromAge: from === null ? null : Math.max(0, from), toAge: Math.min(120, Math.max(0, r.toAge + t.workEnd)) };
+      });
+    }
+    if (t.saving) for (const x of p.savings) x.monthly = Math.max(0, Math.round(x.monthly * f(t.saving)));
+    if (t.rate) for (const k of Object.keys(p.returns)) p.returns[k] = Math.round((p.returns[k] + t.rate) * 1000) / 1000;
+    return cleanPlan(p);
+  }
+
+  const scaleRows = (list, key, k) => list.forEach((r) => (r[key] = Math.round(r[key] * k)));
+  const SENS_ITEMS = [
+    { id: 'work', label: '収入(給与・年金など)', has: (p) => p.incomes.some((r) => r.monthly), scale: (p, k) => scaleRows(p.incomes, 'monthly', k) },
+    { id: 'sidejob', label: '副業収入', has: (p) => p.sidejob.monthly > 0, scale: (p, k) => (p.sidejob.monthly = Math.round(p.sidejob.monthly * k)) },
+    { id: 'extras', label: '臨時収入(ボーナス・退職金など)', has: (p) => p.extras.some((r) => r.amount), scale: (p, k) => scaleRows(p.extras, 'amount', k) },
+    { id: 'repay', label: '家族などからの返済', has: (p) => p.repayments.some((r) => r.monthly), scale: (p, k) => scaleRows(p.repayments, 'monthly', k) },
+    {
+      id: 'living',
+      label: '生活費',
+      has: (p) => p.living.monthly > 0,
+      scale: (p, k) => {
+        p.living.monthly = Math.round(p.living.monthly * k);
+        scaleRows(p.living.changes, 'monthly', k);
+      },
+    },
+    { id: 'loans', label: 'ローン', has: (p) => p.loans.some((r) => r.monthly), scale: (p, k) => scaleRows(p.loans, 'monthly', k) },
+    { id: 'yearly', label: '毎年の費用', has: (p) => p.yearly.some((r) => r.enabled && r.amount), scale: (p, k) => scaleRows(p.yearly, 'amount', k) },
+    { id: 'oneTime', label: '単発の出費', has: (p) => p.oneTime.some((r) => r.enabled && r.amount), scale: (p, k) => scaleRows(p.oneTime, 'amount', k) },
+    { id: 'saving', label: '積立額', has: (p) => p.savings.some((r) => r.monthly), scale: (p, k) => scaleRows(p.savings, 'monthly', k) },
+    {
+      id: 'returns',
+      label: '利回り(年利)',
+      has: (p) => Object.values(p.returns).some((v) => v !== 0),
+      scale: (p, k) => {
+        for (const key of Object.keys(p.returns)) p.returns[key] = Math.round(p.returns[key] * k * 1000) / 1000;
+      },
+    },
+    { id: 'inflation', label: 'インフレ率', has: (p) => p.inflation !== 0, scale: (p, k) => (p.inflation = Math.round(p.inflation * k * 1000) / 1000) },
+    { id: 'cash', label: '今の現金', has: (p) => p.cash !== 0, scale: (p, k) => (p.cash = Math.round(p.cash * k)) },
+    {
+      id: 'assets',
+      label: '今の投資資産',
+      has: (p) => p.assets.some((a) => a.value),
+      scale: (p, k) => {
+        scaleRows(p.assets, 'value', k);
+        scaleRows(p.assets, 'cost', k);
+      },
+    },
+    { id: 'drawFixed', label: '定額の取り崩し額', has: (p) => p.drawdown.method === 'fixed' && p.drawdown.fixedMonthly > 0, scale: (p, k) => (p.drawdown.fixedMonthly = Math.round(p.drawdown.fixedMonthly * k)) },
+    { id: 'drawRate', label: '定率の取り崩し率', has: (p) => p.drawdown.method === 'rate' && p.drawdown.ratePercent > 0, scale: (p, k) => (p.drawdown.ratePercent = Math.round(p.drawdown.ratePercent * k * 1000) / 1000) },
+  ];
+
+  /**
+   * 各項目を ±10% 変えたとき、期間の終わりの総資産が何円変わるか(影響の大きい順)
+   * @returns {{ base: object, items: { id, label, up, down, upShort, downShort }[] }}
+   */
+  function sensitivity(plan, patternId = 'mid') {
+    const run = (p) => simulate(p, p.returns[patternId]).summary;
+    const base = run(plan);
+    const items = [];
+    for (const it of SENS_ITEMS) {
+      if (!it.has(plan)) continue;
+      const [up, down] = [1.1, 0.9].map((k) => {
+        const p = JSON.parse(JSON.stringify(plan));
+        it.scale(p, k);
+        return run(p);
+      });
+      items.push({ id: it.id, label: it.label, up: up.endTotal - base.endTotal, down: down.endTotal - base.endTotal, upShort: up.firstShortYM, downShort: down.firstShortYM });
+    }
+    items.sort((a, b) => Math.max(Math.abs(b.up), Math.abs(b.down)) - Math.max(Math.abs(a.up), Math.abs(a.down)));
+    return { base, items };
   }
 
   // ---- 最新の記録からの初期値 ----
@@ -779,6 +1081,8 @@
   function reloadStart(plan, d, now = new Date()) {
     const c = cashFrom(d, plan.cashSource === 'payments' ? 'payments' : 'monthly');
     const a = assetsFrom(d);
+    const keepIds = new Map(plan.assets.filter((x) => x.sourceKey).map((x) => [x.sourceKey, x.id]));
+    for (const x of a.assets) if (x.sourceKey && keepIds.has(x.sourceKey)) x.id = keepIds.get(x.sourceKey);
     plan.startYM = U.currentYM(now);
     plan.cash = c.cash;
     plan.cashSource = c.cashSource;
@@ -896,6 +1200,103 @@
       });
     }
 
+    // 5. 定額の取り崩し
+    {
+      const plan = basePlan({
+        cash: 1000000,
+        years: 1,
+        living: { monthly: 100000, changes: [] },
+        drawdown: { method: 'fixed', fixedMonthly: 50000 },
+        assets: [{ name: '資産A', group: 'other', value: 1000000, cost: 1000000, taxKind: 'nisa', priority: 'ifNeeded', grows: false }],
+      });
+      const r = simulate(plan, 0);
+      const last = r.months[11];
+      const a = r.buckets.find((b) => b.name === '資産A');
+      out.push({
+        id: 'fixed',
+        title: '定額の取り崩し',
+        setup: '2030年1月から 12か月。現金 1,000,000円、生活費 月 100,000円、毎月 50,000円を資産A(1,000,000円・NISA)から取り崩す。生活防衛資金 0円、利回り 0%',
+        rows: [
+          ['毎月の取り崩し', '50,000', r.months[0].drawGross],
+          ['1年の取り崩し(50,000 × 12)', '600,000', r.years[0].drawGross],
+          ['年末の現金(1,000,000 − 100,000 × 12 + 50,000 × 12)', '400,000', last.cash],
+          ['年末の資産A(1,000,000 − 600,000)', '400,000', a.value],
+        ],
+        ok: r.months[0].drawGross === 50000 && r.years[0].drawGross === 600000 && last.cash === 400000 && a.value === 400000,
+      });
+    }
+
+    // 6. 定率の取り崩し
+    {
+      const plan = basePlan({
+        cash: 0,
+        years: 2,
+        drawdown: { method: 'rate', ratePercent: 4 },
+        assets: [{ name: '資産A', group: 'other', value: 1200000, cost: 1200000, taxKind: 'nisa', priority: 'ifNeeded', grows: false }],
+      });
+      const r = simulate(plan, 0);
+      const a = r.buckets.find((b) => b.name === '資産A');
+      out.push({
+        id: 'rate',
+        title: '定率の取り崩し',
+        setup: '2030年1月から 24か月。資産A 1,200,000円(NISA)を、年初の残高の 4% を 1年かけて月割りで取り崩す。ほかの収支なし、利回り 0%',
+        rows: [
+          ['1年目の毎月(1,200,000 × 4% ÷ 12)', '4,000', r.months[0].drawGross],
+          ['2年目の年初の残高(1,200,000 − 48,000)', '1,152,000', r.months[11].drawable],
+          ['2年目の毎月(1,152,000 × 4% ÷ 12)', '3,840', r.months[12].drawGross],
+          ['2年後の資産A(1,152,000 − 46,080)', '1,105,920', a.value],
+          ['2年後の現金(48,000 + 46,080)', '94,080', r.months[23].cash],
+        ],
+        ok: r.months[0].drawGross === 4000 && r.months[11].drawable === 1152000 && r.months[12].drawGross === 3840 && a.value === 1105920 && r.months[23].cash === 94080,
+      });
+    }
+
+    // 7. 1年あたりの上限
+    {
+      const asset = [{ name: '資産A', group: 'other', value: 3000000, cost: 3000000, taxKind: 'nisa', priority: 'ifNeeded', grows: false }];
+      const fixed = simulate(basePlan({ cash: 0, years: 2, drawdown: { method: 'fixed', fixedMonthly: 50000, yearlyCap: 300000 }, assets: asset }), 0);
+      const need = simulate(basePlan({ cash: 0, years: 1, living: { monthly: 100000, changes: [] }, drawdown: { method: 'shortfall', yearlyCap: 500000 }, assets: asset }), 0);
+      const m6 = need.months[5];
+      out.push({
+        id: 'cap',
+        title: '1年あたりの上限',
+        setup: '資産A 3,000,000円(NISA)、利回り 0%。(1)定額 毎月 50,000円・上限 年 300,000円 (2)不足分だけ・生活費 月 100,000円・現金 0円・上限 年 500,000円',
+        rows: [
+          ['(1)6月までの取り崩し(50,000 × 6)', '300,000', fixed.months.slice(0, 6).reduce((t, m) => t + m.drawGross, 0)],
+          ['(1)7月の取り崩し(上限に届いた)', '0', fixed.months[6].drawGross],
+          ['(1)翌年1月の取り崩し(年が替わると戻る)', '50,000', fixed.months[12].drawGross],
+          ['(2)6月に上限で取り崩せなかった額', '100,000', m6.capBlocked],
+          ['(2)6月末の現金', '−100,000', m6.cash],
+          ['(2)資金不足の最初の年月', '2030年6月', need.summary.firstShortYM ? U.ymLabel(need.summary.firstShortYM) : 'なし'],
+        ],
+        ok:
+          fixed.months.slice(0, 6).reduce((t, m) => t + m.drawGross, 0) === 300000 &&
+          fixed.months[6].drawGross === 0 &&
+          fixed.months[12].drawGross === 50000 &&
+          m6.capBlocked === 100000 &&
+          m6.cash === -100000 &&
+          need.summary.firstShortYM === '2030-06',
+      });
+    }
+
+    // 8. 現金の上限(超えた分を投資に戻す)
+    {
+      const r = simulate(basePlan({ cash: 450000, years: 1, incomes: [{ name: '収入', monthly: 100000 }], drawdown: { cashCap: 500000, reinvest: true } }), 0);
+      const last = r.months[11];
+      out.push({
+        id: 'cashcap',
+        title: '現金の上限(超えた分を投資に戻す)',
+        setup: '2030年1月から 12か月。現金 450,000円、収入 月 100,000円、支出なし、現金の上限 500,000円(超えた分を投資に戻す)、利回り 0%',
+        rows: [
+          ['1月に投資へ戻す額(450,000 + 100,000 − 500,000)', '50,000', r.months[0].reinvested],
+          ['2月に投資へ戻す額', '100,000', r.months[1].reinvested],
+          ['年末の現金', '500,000', last.cash],
+          ['年末の投資(50,000 + 100,000 × 11)', '1,150,000', last.invest],
+        ],
+        ok: r.months[0].reinvested === 50000 && r.months[1].reinvested === 100000 && last.cash === 500000 && last.invest === 1150000,
+      });
+    }
+
     // 4. 利回り 0% のときは単純な足し引きと一致
     {
       const plan = basePlan({
@@ -931,13 +1332,18 @@
     return out;
   }
 
-  // ---- v7 → v8 ----
+  // ---- v7 → v8 → v9 ----
   // 将来予想(future)の区画を足す。中身は読み込み時の点検(normalize)で空の状態から作られる
 
   if (MT.store) {
     MT.store.defineSection('future', { create, normalize, finalize, hasContent, summarize });
     MT.store.addMigration(7, (d) => {
       d.schemaVersion = 8;
+      return d;
+    });
+    // v8 → v9:プランに取り崩しの設定(drawdown)を足す。読み込み時の点検で「不足分だけ」(これまでと同じ動き)が入る
+    MT.store.addMigration(8, (d) => {
+      d.schemaVersion = 9;
       return d;
     });
   }
@@ -971,6 +1377,15 @@
     livingAt,
     endYM,
     monthlyRate,
+    DRAW_METHODS,
+    DRAW_DEFAULTS,
+    TWEAKS,
+    cleanDrawdown,
+    updateDrawdown,
+    drawItems,
+    shortageCause,
+    applyTweaks,
+    sensitivity,
     simulate,
     simulateAll,
     drawdownPlan,

@@ -30,9 +30,9 @@ function plan(patch) {
   return F.cleanPlan({ name: 'テスト', startYM: '2030-01', birthYM: '1980-01', years: 2, returns: { low: 0, mid: 0, high: 0 }, reserve: { months: 0, amount: 0 }, ...patch });
 }
 
-test('計算の確認(画面と同じ 4 つ)はすべて一致する', () => {
+test('計算の確認(画面と同じ 8 つ)はすべて一致する', () => {
   const list = F.checks();
-  assert.equal(list.length, 4);
+  assert.deepEqual(list.map((c) => c.id), ['loan', 'order', 'tax', 'fixed', 'rate', 'cap', 'cashcap', 'zero']);
   for (const c of list) assert.equal(c.ok, true, `${c.title}: ${JSON.stringify(c.rows)}`);
 });
 
@@ -283,14 +283,14 @@ test('おかしな値は直して読み込む(範囲・行の形)', () => {
   assert.equal(p.yearly[0].toYear, null);
 });
 
-test('v7 のデータを開くと v8 になり、空の将来予想の区画が足される(ほかはそのまま)', () => {
+test('v7 のデータを開くと最新の版になり、空の将来予想の区画が足される(ほかはそのまま)', () => {
   const v7 = sample.build(NOW);
   delete v7.future;
   v7.schemaVersion = 7;
   const before = JSON.stringify(v7.payments);
   const res = store.prepare(JSON.parse(JSON.stringify(v7)));
   assert.equal(res.ok, true);
-  assert.equal(res.data.schemaVersion, 8);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
   assert.deepEqual(res.data.future.plans, []);
   assert.equal(JSON.stringify(res.data.payments), before);
 });
@@ -330,4 +330,156 @@ test('最初の1年の内訳と、収入が少ないときの注意', () => {
   const q = plan({ years: 1, cash: 0, incomes: [{ name: '収入', monthly: 100000 }], living: { monthly: 90000, changes: [] }, savings: [{ name: '積立', monthly: 20000 }] });
   assert.equal(F.firstYear(q).net < 0, true);
   assert.equal(F.warnings(q).some((w) => w.includes('赤字')), false);
+});
+
+// ---- 取り崩しの設定 ----
+
+const asset = (name, value, priority = 'ifNeeded', extra = {}) => ({ name, group: 'other', value, cost: value, taxKind: 'nisa', priority, grows: false, ...extra });
+
+test('取り崩しの設定:既定は「不足分だけ」。v8 のプランを開くと既定が入り、結果は変わらない', () => {
+  const p = plan({ cash: 0, years: 1, living: { monthly: 10000, changes: [] }, assets: [asset('A', 50000, 'first')] });
+  assert.equal(p.drawdown.method, 'shortfall');
+  assert.equal(p.drawdown.topUp, true);
+  assert.equal(p.drawdown.fixedMonthly, F.DRAW_DEFAULTS.fixedMonthly);
+  assert.equal(p.drawdown.ratePercent, F.DRAW_DEFAULTS.ratePercent);
+  const v8 = store.createEmpty(NOW);
+  const raw = JSON.parse(JSON.stringify(p));
+  delete raw.drawdown;
+  v8.future = { plans: [raw], activeId: raw.id, compare: { a: raw.id, b: raw.id } };
+  v8.schemaVersion = 8;
+  const res = store.prepare(JSON.parse(JSON.stringify(v8)));
+  assert.equal(res.ok, true);
+  assert.equal(res.data.schemaVersion, 9);
+  assert.equal(res.data.future.plans[0].drawdown.method, 'shortfall');
+  assert.deepEqual(F.simulate(res.data.future.plans[0], 0).summary, F.simulate(p, 0).summary);
+});
+
+test('取り崩しの対象:「売りたくない」は既定でオフ、オンにすると使う。順番の入れ替えとオフ', () => {
+  const p = plan({ cash: 0, years: 1, living: { monthly: 30000, changes: [] }, assets: [asset('B', 100000), asset('K', 100000, 'keep'), asset('A', 100000, 'first')] });
+  const items = F.drawItems(p);
+  assert.deepEqual(items.map((x) => [x.name, x.on]), [['A', true], ['B', true], ['K', false]]);
+  const keyOf = (n) => items.find((x) => x.name === n).key;
+  // 順番を K → B → A にして、K をオン、A をオフ
+  p.drawdown = F.cleanDrawdown({ ...p.drawdown, order: [keyOf('K'), keyOf('B'), keyOf('A')], targets: { [keyOf('K')]: true, [keyOf('A')]: false } });
+  const r = F.simulate(p, 0);
+  assert.deepEqual(r.months[0].sales.map((x) => x.name), ['K']);
+  assert.equal(r.buckets.find((b) => b.name === 'A').value, 100000);
+  // すべてオフなら補わず、注意を出す
+  p.drawdown = F.cleanDrawdown({ ...p.drawdown, targets: { [keyOf('K')]: false, [keyOf('A')]: false, [keyOf('B')]: false } });
+  assert.equal(F.simulate(p, 0).months[0].cash, -30000);
+  assert.ok(F.warnings(p).some((w) => w.includes('すべてオフ')));
+});
+
+test('定額:期間(年齢)の外は「不足分だけ」。不足分を補わない設定なら、足りない月は資金不足', () => {
+  const base = { birthYM: '1970-01', cash: 0, years: 1, living: { monthly: 20000, changes: [] }, assets: [asset('A', 10000000)] };
+  // 2030年は 60 歳。定額は 61 歳から → この年は不足分だけ(生活費の分だけ)
+  const before = F.simulate(plan({ ...base, drawdown: { method: 'fixed', fixedMonthly: 50000, fromAge: 61 } }), 0);
+  assert.equal(before.months[0].drawPlanNet, 0);
+  assert.equal(before.months[0].drawNeedNet, 20000);
+  // 60 歳から:毎月 50,000 を取り崩し、不足分は出ない
+  const during = F.simulate(plan({ ...base, drawdown: { method: 'fixed', fixedMonthly: 50000, fromAge: 60 } }), 0);
+  assert.equal(during.months[0].drawPlanNet, 50000);
+  assert.equal(during.months[0].cash, 30000);
+  // 定額 10,000・不足分を補わない → 毎月 −10,000 ずつ足りない
+  const noTop = F.simulate(plan({ ...base, drawdown: { method: 'fixed', fixedMonthly: 10000, topUp: false } }), 0);
+  assert.equal(noTop.months[0].cash, -10000);
+  assert.equal(noTop.summary.firstShortYM, '2030-01');
+  // 補う設定なら、足りない分も取り崩す(併用)
+  const top = F.simulate(plan({ ...base, drawdown: { method: 'fixed', fixedMonthly: 10000, topUp: true } }), 0);
+  assert.deepEqual([top.months[0].drawPlanNet, top.months[0].drawNeedNet, top.months[0].cash], [10000, 10000, 0]);
+});
+
+test('定額の税:課税口座は売る額から税を引いた手取りが現金に入る', () => {
+  const r = F.simulate(plan({ cash: 0, years: 1, drawdown: { method: 'fixed', fixedMonthly: 100000 }, assets: [asset('X', 1000000, 'ifNeeded', { cost: 500000, taxKind: 'taxable' })] }), 0);
+  const sl = r.months[0].sales[0];
+  assert.equal(sl.gross, 100000);
+  assert.equal(sl.tax, Math.round(100000 * 0.5 * 0.20315));
+  assert.equal(r.months[0].cash, 100000 - sl.tax);
+});
+
+test('現金の上限:上限以上の月は定額・定率を休む(戻す設定がなくても)', () => {
+  const r = F.simulate(plan({ cash: 600000, years: 1, living: { monthly: 100000, changes: [] }, drawdown: { method: 'fixed', fixedMonthly: 50000, cashCap: 500000 }, assets: [asset('A', 1000000)] }), 0);
+  // 1月:600,000 − 100,000 = 500,000(上限以上)→ 休む / 2月:400,000 → 50,000 取り崩す
+  assert.equal(r.months[0].paused, true);
+  assert.equal(r.months[0].drawGross, 0);
+  assert.equal(r.months[1].drawGross, 50000);
+  assert.equal(r.months[1].cash, 450000);
+});
+
+test('複製と読み直しで、取り崩しの対象・順番の設定が消えない', () => {
+  const d = sample.build(NOW);
+  const f = F.create();
+  const id = F.addPlan(f, F.newPlan(d, NOW, 'もと'));
+  const p = F.findPlan(f, id);
+  const items = F.drawItems(p);
+  const k0 = items[0].key;
+  F.updateDrawdown(f, id, { targets: { [k0]: false }, order: items.map((x) => x.key).reverse() });
+  // 読み直し:同じ出どころの資産は id を引き継ぐ
+  F.reloadStart(F.findPlan(f, id), d, NOW);
+  const after = F.drawItems(F.findPlan(f, id));
+  assert.equal(after.find((x) => x.key === k0).on, false);
+  assert.equal(after[after.length - 1].key, k0);
+  // 複製:キーが新しい id に付け替わる
+  const id2 = F.duplicatePlan(f, id, 'コピー');
+  const c = F.drawItems(F.findPlan(f, id2));
+  assert.deepEqual(c.map((x) => [x.name, x.on]), after.map((x) => [x.name, x.on]));
+  assert.ok(c.every((x) => !x.key.startsWith('a:') || F.findPlan(f, id2).assets.some((a) => `a:${a.id}` === x.key)));
+});
+
+// ---- 原因の見える化 ----
+
+test('資金不足の年の内訳と理由(単発の出費・上限・取り崩せる資産なし)', () => {
+  const p = plan({
+    startYM: '2030-01',
+    years: 3,
+    cash: 500000,
+    incomes: [{ name: '収入', monthly: 100000 }],
+    living: { monthly: 100000, changes: [] },
+    oneTime: [{ name: '車', ym: '2031-06', amount: 900000 }],
+    assets: [asset('A', 200000)],
+  });
+  const r = F.simulate(p, 0);
+  const c = F.shortageCause(p, r);
+  assert.equal(c.year.year, 2031);
+  assert.equal(c.comparable, true);
+  assert.equal(c.rows.find((x) => x.key === 'oneTime').cur, 900000);
+  assert.equal(c.rows.find((x) => x.key === 'cashStart').cur, 500000);
+  assert.ok(c.reasons.some((t) => t.includes('車')));
+  assert.ok(c.reasons.some((t) => t.includes('取り崩せる資産がなくなりました')));
+  const capPlan = plan({ cash: 0, years: 1, living: { monthly: 100000, changes: [] }, drawdown: { yearlyCap: 200000 }, assets: [asset('A', 5000000)] });
+  const cc = F.shortageCause(capPlan, F.simulate(capPlan, 0));
+  assert.ok(cc.reasons[0].includes('上限'));
+  assert.equal(F.shortageCause(plan({ cash: 1 }), F.simulate(plan({ cash: 1 }), 0)), null);
+});
+
+test('ちょっと変えたら:生活費・収入の終わり・積立・利回りを一時的に動かす(元のプランは変えない)', () => {
+  const p = plan({
+    birthYM: '1970-01',
+    incomes: [{ name: '給与', toAge: 59, monthly: 300000 }, { name: '再雇用', fromAge: 60, toAge: 64, monthly: 180000 }, { name: '年金', fromAge: 65, monthly: 150000 }],
+    living: { monthly: 200000, changes: [{ fromAge: 65, monthly: 150000 }] },
+    savings: [{ name: '積立', monthly: 30000 }],
+    returns: { low: 1, mid: 3, high: 5 },
+  });
+  const t = F.applyTweaks(p, { living: -10, workEnd: 2, saving: 50, rate: 1 });
+  assert.equal(t.living.monthly, 180000);
+  assert.equal(t.living.changes[0].monthly, 135000);
+  assert.deepEqual(t.incomes.map((r) => [r.name, r.fromAge, r.toAge]), [['給与', null, 61], ['再雇用', 62, 66], ['年金', 65, null]]);
+  assert.equal(t.savings[0].monthly, 45000);
+  assert.deepEqual(t.returns, { low: 2, mid: 4, high: 6 });
+  assert.equal(p.living.monthly, 200000); // 元はそのまま
+  assert.deepEqual(F.applyTweaks(p, {}).incomes, p.incomes);
+});
+
+test('10% 変えたときの影響:期間の終わりの総資産の差を、大きい順に並べる', () => {
+  const p = plan({ years: 10, cash: 1000000, incomes: [{ name: '収入', monthly: 300000 }], living: { monthly: 200000, changes: [] }, loans: [{ name: 'ローン', monthly: 10000 }], returns: { low: 1, mid: 3, high: 5 }, assets: [asset('A', 1000000, 'ifNeeded', { grows: true })] });
+  const s = F.sensitivity(p, 'mid');
+  const by = Object.fromEntries(s.items.map((x) => [x.id, x]));
+  assert.equal(by.work.up, 300000 * 0.1 * 120); // 収入 +10% → 月 30,000 × 120 か月(現金は増えない)
+  assert.equal(by.living.up, -200000 * 0.1 * 120);
+  assert.equal(by.loans.up, -1000 * 120);
+  assert.ok(by.returns.up > 0);
+  const mags = s.items.map((x) => Math.max(Math.abs(x.up), Math.abs(x.down)));
+  assert.deepEqual(mags, [...mags].sort((a, b) => b - a));
+  assert.equal(s.items[0].id, 'work');
+  assert.ok(!by.sidejob); // 0 円の項目は出さない
 });

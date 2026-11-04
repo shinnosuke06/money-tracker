@@ -18,6 +18,7 @@
 
   const SUBNAV = [
     { path: 'future', label: '予想' },
+    { path: 'future/why', label: '原因' },
     { path: 'future/plan', label: '条件' },
     { path: 'future/compare', label: '比較' },
     { path: 'future/check', label: '計算の確認' },
@@ -25,7 +26,7 @@
   const DISCLAIMER = '仮定にもとづく予想で、将来を保証するものではありません';
 
   // 描き直しても保つ表示の状態(データには入れない)
-  const state = { pattern: 'mid', chart: 'total', drawYear: null, cmpPattern: 'mid' };
+  const state = { pattern: 'mid', chart: 'total', drawYear: null, cmpPattern: 'mid', tweaks: {}, tweakPlan: null };
 
   const MINUS = '−';
   const yen = (v) => `${U.yen(v)}円`;
@@ -258,16 +259,27 @@
       h(
         'p',
         { class: 'hint' },
-        `期間:${U.ymLabel(plan.startYM)}〜${U.ymLabel(F.endYM(plan))}(${plan.years}年)・インフレ率 年${plan.inflation}%・生活防衛資金 ${yen(F.reserveNow(plan))}${plan.reserve.amount === null ? `(生活費の${plan.reserve.months}か月分)` : ''}。利回りは仮の値で、「条件」で直せます。`
-      )
+        `期間:${U.ymLabel(plan.startYM)}〜${U.ymLabel(F.endYM(plan))}(${plan.years}年)・インフレ率 年${plan.inflation}%・生活防衛資金 ${yen(F.reserveNow(plan))}${plan.reserve.amount === null ? `(生活費の${plan.reserve.months}か月分)` : ''}・取り崩し:${drawMethodText(plan)}。利回りは仮の値で、「条件」で直せます。`
+      ),
+      F.PATTERNS.some((p) => all[p.id].summary.firstShortYM)
+        ? h('div', { class: 'button-row' }, btn('資金不足の原因を見る', { size: 'small', icon: 'alert', onClick: () => MT.app.navigate('future/why') }))
+        : null
     );
   }
 
-  function patternBar(plan) {
+  /** 取り崩しの方式の短い説明 */
+  function drawMethodText(plan) {
+    const dd = plan.drawdown;
+    if (dd.method === 'shortfall') return '不足分だけ';
+    const amount = dd.method === 'fixed' ? `定額 月${U.yen(dd.fixedMonthly)}円` : `定率 年${dd.ratePercent}%`;
+    return `${amount}${dd.topUp ? '+不足分' : ''}`;
+  }
+
+  function patternBar(plan, labelText = '表のパターン(利回り)') {
     return h(
       'section',
       { class: 'card fx-pattern' },
-      h('p', { class: 'fx-pattern-label', text: '表のパターン(利回り)' }),
+      h('p', { class: 'fx-pattern-label', text: labelText }),
       seg(
         F.PATTERNS.map((p) => ({ value: p.id, label: `${p.label} ${plan.returns[p.id]}%` })),
         state.pattern,
@@ -375,7 +387,9 @@
     const out = (v) => (v > 0 ? `${MINUS}${yen(v)}` : '0円');
     add(
       s.body,
-      y.shortYM ? h('p', { class: 'field-error', text: `資金不足:${U.ymLabel(y.shortYM)}に現金がマイナスになります(取り崩しても足りません)。` }) : null,
+      y.shortYM
+        ? h('p', { class: 'field-error', text: y.shortReason === 'cap' ? `資金不足:${U.ymLabel(y.shortYM)}に、1年あたりの上限のため必要な分を取り崩せません。` : `資金不足:${U.ymLabel(y.shortYM)}に現金がマイナスになります(取り崩しても足りません)。` })
+        : null,
       y.belowYM && !y.shortYM ? h('p', { class: 'fx-warn-line', text: `${U.ymLabel(y.belowYM)}に生活防衛資金を割ります(取り崩せる資産が足りません)。` }) : null,
       h(
         'dl',
@@ -388,6 +402,11 @@
         row('単発の出費', out(y.oneTime)),
         row('収支', `${U.yenSigned(y.flow)}円`, tone(y.flow)),
         row('取り崩し(手取り)', y.drawNet ? `+${yen(y.drawNet)}` : '0円'),
+        y.drawPlanNet ? row('うち定額・定率', `+${yen(y.drawPlanNet)}`) : null,
+        y.drawPlanNet && y.drawNeedNet ? row('うち不足分', `+${yen(y.drawNeedNet)}`) : null,
+        y.capBlocked ? row('上限で取り崩せなかった額', yen(y.capBlocked), 'is-neg') : null,
+        y.reinvested ? row('現金の上限を超えて投資へ戻した額', yen(y.reinvested)) : null,
+        y.pausedMonths ? row('現金が上限以上で休んだ月', `${y.pausedMonths}か月`) : null,
         row('年末の現金', yen(y.cash), y.cash < 0 ? 'is-neg' : ''),
         row('年末の投資', yen(y.invest)),
         row('年末の総資産', yen(y.total), y.total < 0 ? 'is-neg' : '')
@@ -621,8 +640,32 @@
         ],
         () => UI.openReserveSheet(id),
         [h('p', { class: 'hint', text: '現金がこの額を下回る月は、投資から取り崩して補います。' })]
-      )
+      ),
+      drawdownCard(plan)
     );
+  }
+
+  /** 取り崩しの設定(条件の画面) */
+  function drawdownCard(plan) {
+    const dd = plan.drawdown;
+    const D = F.DRAW_DEFAULTS;
+    const items = F.drawItems(plan);
+    const onCount = items.filter((x) => x.on).length;
+    const assumed = (isDefault) => (isDefault ? '(仮の値)' : '');
+    const rowsKv = [['方式', F.label(F.DRAW_METHODS, dd.method)]];
+    if (dd.method === 'fixed') rowsKv.push(['毎月の取り崩し額', `${yen(dd.fixedMonthly)}${assumed(dd.fixedMonthly === D.fixedMonthly)}`, dd.fixedMonthly === D.fixedMonthly ? 'is-warn-num' : '']);
+    if (dd.method === 'rate') rowsKv.push(['年初の残高の', `${dd.ratePercent}%${assumed(dd.ratePercent === D.ratePercent)}`, dd.ratePercent === D.ratePercent ? 'is-warn-num' : '']);
+    if (dd.method !== 'shortfall') {
+      rowsKv.push(['期間(年齢)', dd.fromAge === null && dd.toAge === null ? '今から期間の終わりまで' : `${dd.fromAge === null ? '今' : `${dd.fromAge}歳`}〜${dd.toAge === null ? '期間の終わり' : `${dd.toAge}歳`}(外は不足分だけ)`]);
+      rowsKv.push(['足りないとき', dd.topUp ? '不足分も補う(併用)' : '補わない(資金不足になる)']);
+    }
+    rowsKv.push(['1年あたりの上限', dd.yearlyCap === null ? 'なし' : yen(dd.yearlyCap)]);
+    rowsKv.push(['現金の上限', dd.cashCap === null ? 'なし' : `${yen(dd.cashCap)}${dd.reinvest ? '(超えた分は投資へ)' : '(以上の月は定額・定率を休む)'}`]);
+    rowsKv.push(['取り崩す資産', `${onCount}件オン / ${items.length}件`, onCount ? '' : 'is-neg']);
+    return kvCard('取り崩しの設定', rowsKv, () => UI.openDrawdownSheet(plan.id), [
+      h('div', { class: 'button-row' }, btn('取り崩す資産と順番', { size: 'small', onClick: () => UI.openDrawTargetsSheet(plan.id) })),
+      h('p', { class: 'hint', text: '売る順は「最初に売る」→「足りなければ売る」(入れ替えもできます)。売った額から税を引いた手取りを現金に入れます。黄色の値は仮の値です。' }),
+    ]);
   }
 
   function assetsCard(plan) {
@@ -660,6 +703,247 @@
         )
       ),
       h('div', { class: 'card-foot button-row' }, btn('最新の記録から読み直す', { icon: 'sync', size: 'small', onClick: () => UI.reloadStartFlow(id) }))
+    );
+  }
+
+  // ---------------------------------------------------------------
+  // 原因(資金不足の年の内訳・ちょっと変えたら・10% 変えたときの影響)
+  // ---------------------------------------------------------------
+
+
+  function renderWhy(container) {
+    const d = store.get();
+    const f = d.future;
+    head(container, 'future/why');
+    if (!f.plans.length) return container.append(welcome());
+    const plan = F.activePlan(f);
+    if (state.tweakPlan !== plan.id) {
+      state.tweakPlan = plan.id;
+      state.tweaks = {};
+    }
+    const res = F.simulate(plan, plan.returns[state.pattern]);
+    container.append(planBar(f, plan), patternBar(plan, '見るパターン(利回り)'), causeCard(plan, res), whatIfCard(plan), sensitivityCard(plan));
+  }
+
+  /** 資金不足が最初に出る年の内訳 */
+  function causeCard(plan, res) {
+    const c = F.shortageCause(plan, res);
+    const title = `資金不足の原因(${patLabel(plan, state.pattern)})`;
+    if (!c) {
+      const below = res.summary.firstBelowYM;
+      return h(
+        'section',
+        { class: 'card' },
+        h('h2', { class: 'card-title', text: title }),
+        h('p', { class: 'is-pos fx-strong', text: 'このパターンでは、期間内に資金不足は出ません。' }),
+        below ? h('p', { class: 'hint', text: `ただし ${ymAge(plan, below)} に生活防衛資金を割ります。下の「ちょっと変えたら」で、余裕がどう変わるかを試せます。` }) : null
+      );
+    }
+    const y = c.year;
+    const prevLabel = c.prev ? `${c.prev.year}年` : '—';
+    const cell = (v, key) => {
+      if (v == null) return h('td', { text: '—' });
+      const neg = ['living', 'loans', 'saving', 'yearly', 'oneTime', 'capBlocked'].includes(key) && v > 0;
+      return h('td', { class: `fx-num${neg ? ' is-neg' : (key === 'cash' || key === 'cashStart') && v < 0 ? ' is-neg' : ''}`, text: man(v) });
+    };
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: title }),
+      h(
+        'p',
+        { class: 'fx-cause-head' },
+        h('span', { class: 'fx-tri', 'aria-hidden': 'true' }),
+        `${ymAge(plan, y.shortYM)}に、${y.shortReason === 'cap' ? '1年あたりの上限のため必要な分を取り崩せません' : '取り崩しても現金がマイナスになります'}。`
+      ),
+      h('h3', { class: 'sp-title', text: '考えられる理由' }),
+      h('ul', { class: 'fx-reasons' }, c.reasons.map((t) => h('li', { text: t }))),
+      h('h3', { class: 'sp-title', text: `${y.year}年の内訳${c.comparable ? '(前の年と比べて)' : ''}` }),
+      h(
+        'div',
+        { class: 'fx-sum-wrap' },
+        h(
+          'table',
+          { class: 'fx-sum' },
+          h('thead', null, h('tr', null, h('th', { scope: 'col', text: '単位:万円' }), h('th', { scope: 'col', text: prevLabel }), h('th', { scope: 'col', text: `${y.year}年` }), c.comparable ? h('th', { scope: 'col', text: '差' }) : null)),
+          h(
+            'tbody',
+            null,
+            c.rows.map((r) =>
+              h(
+                'tr',
+                null,
+                h('th', { scope: 'row', text: r.label }),
+                cell(r.prev, r.key),
+                cell(r.cur, r.key),
+                c.comparable ? diffCell(r) : null
+              )
+            )
+          )
+        )
+      ),
+      h('p', { class: 'hint', text: c.comparable ? '' : '前の年が一部の月だけのため、差は出していません。' }),
+      h('div', { class: 'button-row' }, btn(`${y.year}年の内訳と取り崩し案`, { size: 'small', onClick: () => openYearSheet(plan, res, y) }))
+    );
+  }
+
+  const COST_KEYS = new Set(['living', 'loans', 'saving', 'yearly', 'oneTime', 'capBlocked']);
+  /** 前の年との差(支出の行は増えると赤、ほかは増えると緑。万円に丸めて 0 なら ±0) */
+  function diffCell(r) {
+    const dv = r.cur - r.prev;
+    if (Math.round(Math.abs(dv) / 10000) === 0) return h('td', { class: 'fx-num', text: '±0' });
+    const good = COST_KEYS.has(r.key) ? dv < 0 : dv > 0;
+    return h('td', { class: `fx-num ${good ? 'is-pos' : 'is-neg'}`, text: signedMan(dv) });
+  }
+
+  /** 結果の 2 列(いまの条件 / 動かしたあと)を更新する */
+  function whatIfResult(plan, box) {
+    const base = F.simulate(plan, plan.returns[state.pattern]).summary;
+    const tp = F.applyTweaks(plan, state.tweaks);
+    const after = F.simulate(tp, tp.returns[state.pattern]).summary;
+    const diff = after.endTotal - base.endTotal;
+    const sy = (ym) => (ym ? ymAgeCell(plan, ym, 'is-neg fx-strong') : okCell());
+    box.replaceChildren(
+      h(
+        'table',
+        { class: 'fx-sum' },
+        h('thead', null, h('tr', null, h('th', { scope: 'col', text: '' }), h('th', { scope: 'col', text: 'いまの条件' }), h('th', { scope: 'col', text: '動かしたあと' }))),
+        h(
+          'tbody',
+          null,
+          h('tr', null, h('th', { scope: 'row', text: '資金が足りなくなる年' }), h('td', null, sy(base.firstShortYM)), h('td', null, sy(after.firstShortYM))),
+          h(
+            'tr',
+            null,
+            h('th', { scope: 'row' }, '期間の終わりの総資産', h('small', { text: '万円' })),
+            h('td', { class: `fx-num fx-strong${base.endTotal < 0 ? ' is-neg' : ''}`, text: man(base.endTotal) }),
+            h('td', { class: `fx-num fx-strong${after.endTotal < 0 ? ' is-neg' : ''}`, text: man(after.endTotal) })
+          )
+        )
+      ),
+      h('p', { class: `fx-diff ${tone(diff)}`.trim(), text: `差:${diff > 0 ? '+' : ''}${manYen(diff)}` })
+    );
+    return tp;
+  }
+
+  /** ちょっと変えたらどうなる(スライダーで一時的に動かす。保存するまでプランは変わらない) */
+  function whatIfCard(plan) {
+    const box = h('div', { class: 'fx-whatif-result', 'aria-live': 'polite' });
+    const hasWork = !!plan.birthYM && plan.incomes.some((r) => r.toAge !== null);
+    const hasSaving = plan.savings.some((r) => r.monthly > 0);
+    const totalSaving = plan.savings.reduce((t, r) => t + r.monthly, 0);
+    const describe = (t, v) => {
+      if (t.id === 'living') return `今 月${U.yen(plan.living.monthly)}円 → 月${U.yen(Math.round(plan.living.monthly * (1 + v / 100)))}円`;
+      if (t.id === 'workEnd') return hasWork ? `収入の終わり:${plan.incomes.filter((r) => r.toAge !== null).map((r) => `${r.name} ${r.toAge}歳 → ${Math.min(120, Math.max(0, r.toAge + v))}歳`).join('・')}` : '生年月と、「何歳まで」のある収入を入れると動かせます';
+      if (t.id === 'saving') return hasSaving ? `今 月${U.yen(totalSaving)}円 → 月${U.yen(Math.round(totalSaving * (1 + v / 100)))}円` : '積立投資がありません';
+      return `${F.label(F.PATTERNS, state.pattern)}:年${plan.returns[state.pattern]}% → 年${Math.round((plan.returns[state.pattern] + v) * 1000) / 1000}%`;
+    };
+    const sign = (v, unit) => `${v > 0 ? '+' : v < 0 ? MINUS : '±'}${Math.abs(v)}${unit}`;
+    const rows = F.TWEAKS.map((t) => {
+      const v = state.tweaks[t.id] || 0;
+      const disabled = (t.id === 'workEnd' && !hasWork) || (t.id === 'saving' && !hasSaving);
+      const valueEl = h('span', { class: 'fx-tweak-value', text: sign(v, t.unit) });
+      const noteEl = h('p', { class: 'hint fx-tweak-note', text: describe(t, v) });
+      const input = h('input', {
+        type: 'range',
+        class: 'fx-range',
+        min: String(t.min),
+        max: String(t.max),
+        step: String(t.step),
+        value: String(v),
+        disabled,
+        'aria-label': `${t.label}を動かす(${t.unit})`,
+      });
+      let raf = 0;
+      input.addEventListener('input', () => {
+        const nv = Number(input.value);
+        state.tweaks = { ...state.tweaks, [t.id]: nv };
+        valueEl.textContent = sign(nv, t.unit);
+        noteEl.textContent = describe(t, nv);
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => whatIfResult(plan, box));
+      });
+      return h('div', { class: `fx-tweak${disabled ? ' is-disabled' : ''}` }, h('div', { class: 'fx-tweak-head' }, h('span', { class: 'fx-tweak-label', text: t.label }), valueEl), input, noteEl);
+    });
+    whatIfResult(plan, box);
+    const changed = () => Object.values(state.tweaks).some((v) => v);
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: 'ちょっと変えたらどうなる' }),
+      h('p', { class: 'hint', text: `スライダーで一時的に動かして、${patLabel(plan, state.pattern)}の結果がどう変わるかをすぐに見られます。「この条件で保存」を押すまで、プランは変わりません。` }),
+      rows,
+      box,
+      h(
+        'div',
+        { class: 'button-row' },
+        btn('元に戻す', {
+          size: 'small',
+          onClick: () => {
+            state.tweaks = {};
+            MT.app.rerender();
+          },
+        }),
+        btn('この条件で保存', {
+          size: 'small',
+          variant: 'primary',
+          onClick: async () => {
+            if (!changed()) return MT.ui.toast('動かした項目がありません');
+            const ok = await MT.ui.confirmDialog({
+              title: 'この条件でプランを保存しますか?',
+              message: [`プラン「${plan.name}」の生活費・収入の年齢・積立額・利回りを、動かした値に書き換えます。元に戻すときは、設定の「直前のデータに戻す」を使えます。`],
+              okLabel: '保存する',
+            });
+            if (!ok) return;
+            const next = F.applyTweaks(plan, state.tweaks);
+            if (
+              store.update(
+                (dd) => {
+                  const i = dd.future.plans.findIndex((x) => x.id === plan.id);
+                  if (i >= 0) dd.future.plans[i] = next;
+                },
+                { backup: `将来予想のプラン「${plan.name}」の条件の書き換え` }
+              )
+            ) {
+              state.tweaks = {};
+              MT.ui.toast('保存しました');
+            }
+          },
+        })
+      )
+    );
+  }
+
+  /** 各項目を 10% 変えたときの影響(大きい順) */
+  function sensitivityCard(plan) {
+    const s = F.sensitivity(plan, state.pattern);
+    const baseShort = s.base.firstShortYM;
+    const shortYM = (ym) => {
+      if (!ym) return 'なし';
+      const { y, m } = U.splitYM(ym);
+      return `${y}年${m}月`;
+    };
+    return h(
+      'section',
+      { class: 'card card-flush' },
+      h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: '10% 変えたときの影響' }), h('span', { class: 'hint', text: '単位:万円' })),
+      h('p', { class: 'card-text hint', text: `各項目を 10% 増やした / 減らしたときに、期間の終わりの総資産(${patLabel(plan, state.pattern)})が何円変わるか。影響の大きい順です。いまの資金不足の年:${baseShort ? ymAge(plan, baseShort) : 'なし(期間内は大丈夫)'}。資金不足の年が変わる項目には、変わったあとの年月を添えています。` }),
+      s.items.length
+        ? h(
+            'ul',
+            { class: 'pay-list fx-sens' },
+            s.items.map((x) => {
+              const changed = x.upShort !== baseShort || x.downShort !== baseShort;
+              const notes = changed ? [`資金不足 +10%:${shortYM(x.upShort)}・−10%:${shortYM(x.downShort)}`] : [];
+              return h(
+                'li',
+                { class: 'fx-sens-row' },
+                h('span', { class: 'fx-sens-label' }, x.label, notes.length ? h('small', { text: notes.join('・') }) : null),
+                h('span', { class: 'fx-sens-nums' }, h('span', null, h('small', { text: '+10%' }), h('span', { class: `fx-num fx-strong ${tone(x.up)}`.trim(), text: signedMan(x.up) })), h('span', null, h('small', { text: '−10%' }), h('span', { class: `fx-num ${tone(x.down)}`.trim(), text: signedMan(x.down) })))
+              );
+            })
+          )
+        : h('p', { class: 'card-text hint', text: '動かせる項目がありません。' })
     );
   }
 
@@ -839,6 +1123,7 @@
 
   MT.views = MT.views || {};
   MT.views.future = { render: renderForecast, tab: 'more' };
+  MT.views['future/why'] = { render: renderWhy, tab: 'more' };
   MT.views['future/plan'] = { render: renderPlan, tab: 'more' };
   MT.views['future/compare'] = { render: renderCompare, tab: 'more' };
   MT.views['future/check'] = { render: renderCheck, tab: 'more' };

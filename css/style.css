@@ -3770,3 +3770,128 @@ html.is-shot .theme-toggle {
   font-size: 11px;
   color: var(--text-3);
 }
+
+/* 将来予想:取り崩しの設定・原因の見える化 */
+.fx-tag-list {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.fx-tag-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+.fx-tag-name {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+.fx-tag-count {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.btn.fx-tag-btn {
+  padding: 0 10px;
+  font-size: 13px;
+}
+.fx-target-list {
+  margin-bottom: 10px;
+  border-top: 1px solid var(--line);
+}
+.fx-target-main {
+  cursor: default;
+}
+.fx-cause-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  font-weight: 700;
+  color: var(--negative);
+}
+.fx-cause-head .fx-tri {
+  margin-top: 5px;
+}
+.fx-reasons {
+  margin: 0 0 8px;
+  padding-left: 1.2em;
+  font-size: 14px;
+}
+.fx-reasons li {
+  margin-bottom: 4px;
+}
+.fx-tweak {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.fx-tweak.is-disabled {
+  opacity: 0.6;
+}
+.fx-tweak-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.fx-tweak-label {
+  font-weight: 700;
+}
+.fx-tweak-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-text);
+}
+.fx-tweak-note {
+  margin: 0;
+}
+.fx-range {
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  accent-color: var(--accent);
+  touch-action: pan-y;
+}
+.fx-whatif-result {
+  margin-top: 10px;
+}
+.fx-sens-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.fx-sens-row:last-child {
+  border-bottom: 0;
+}
+.fx-sens-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.fx-sens-label small {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.fx-sens-nums {
+  display: grid;
+  grid-template-columns: repeat(2, 5.2em);
+  gap: 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.fx-sens-nums > span {
+  display: grid;
+}
+.fx-sens-nums small {
+  font-size: 10px;
+  color: var(--text-3);
+}

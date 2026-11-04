@@ -389,6 +389,149 @@
     });
   }
 
+  // ---------------------------------------------------------------
+  // 取り崩しの設定
+  // ---------------------------------------------------------------
+
+  function openDrawdownSheet(planId) {
+    const plan = F.findPlan(store.get().future, planId);
+    const dd = plan.drawdown;
+    const D = F.DRAW_DEFAULTS;
+    openFieldsSheet({
+      title: '取り崩しの設定',
+      description: '取り崩しは、売った額から税を引いた手取りを現金に入れます(税率は「利回りの仮定と税率」の値)。',
+      plan,
+      fields: [
+        { key: 'method', label: '方式', type: 'select', options: F.DRAW_METHODS, hint: '不足分だけ:現金が生活防衛資金を下回る月に補う / 定額:毎月決まった額 / 定率:年初の残高の◯%を 1 年かけて月割り' },
+        { key: 'fixedMonthly', label: '定額:毎月の取り崩し額(売る額)', type: 'yen', min: 0, hint: `定額のときに使います。初期値 ${U.yen(D.fixedMonthly)}円は仮の値です` },
+        { key: 'ratePercent', label: '定率:年初の残高の何%', type: 'percent', min: 0, max: 100, hint: `定率のときに使います。初期値 ${D.ratePercent}% は仮の値です。年初(1月か計算の最初の月)の、取り崩しの対象の残高に掛けます` },
+        { key: 'topUp', label: '不足分も補う', type: 'check', checkLabel: '定額・定率のうえで、足りなければ不足分も補う(併用)' },
+        { key: 'fromAge', label: '定額・定率を始める年齢', type: 'int', unit: '歳', min: 0, max: 120, allowEmpty: true, hint: '空欄は今から。始める前と終わった後は「不足分だけ」で補います(生年月が必要)' },
+        { key: 'toAge', label: '定額・定率を終える年齢', type: 'int', unit: '歳', min: 0, max: 120, allowEmpty: true, hint: '空欄は期間の終わりまで。その年齢のあいだは取り崩します' },
+        { key: 'yearlyCap', label: '1年あたりの上限(売る額)', type: 'yen', min: 0, allowEmpty: true, hint: '空欄は上限なし。1〜12月に売る額の合計の上限です。上限のために必要な分を取り崩せない月は「資金不足」として記録します' },
+        { key: 'cashCap', label: '現金の上限', type: 'yen', min: 0, allowEmpty: true, hint: '空欄は上限なし。現金がこの額以上の月は、定額・定率の取り崩しを休みます' },
+        { key: 'reinvest', label: '上限を超えた現金', type: 'check', checkLabel: '現金の上限を超えた分を投資に戻す(課税口座として利回りで増やし、取り崩しの対象にも入れます)' },
+      ],
+      value: dd,
+      onSave: (v) => {
+        if (v.fromAge !== null && v.toAge !== null && v.fromAge > v.toAge) return '始める年齢は、終える年齢以下にしてください';
+        if (v.reinvest && v.cashCap === null) return '投資に戻すときは、現金の上限を入れてください';
+        store.update((d) => F.updateDrawdown(d.future, planId, v));
+        toast('取り崩しの設定を保存しました');
+        return true;
+      },
+    });
+  }
+
+  /** 取り崩す資産と順番(資産ごとのオン/オフ、優先度ごとにまとめてオン/オフ、並べ替え) */
+  function openDrawTargetsSheet(planId) {
+    const plan = F.findPlan(store.get().future, planId);
+    const items = F.drawItems(plan);
+    let order = items.map((x) => x.key);
+    const on = Object.fromEntries(items.map((x) => [x.key, x.on]));
+    const info = new Map(items.map((x) => [x.key, x]));
+    const s = openSheet({
+      title: '取り崩す資産と順番',
+      description: '上から順に取り崩します。スイッチでオン/オフ(「売りたくない」は初期でオフ)。',
+      className: 'sheet-form',
+    });
+    const tagBox = h('div', { class: 'fx-tag-list' });
+    const list = h('ul', { class: 'pay-list fx-list fx-target-list' });
+    function render() {
+      tagBox.replaceChildren(
+        ...F.PRIORITIES.map((pr) => {
+          const keys = order.filter((k) => info.get(k).priority === pr.id);
+          if (!keys.length) return null;
+          const n = keys.filter((k) => on[k]).length;
+          const set = (v) => () => {
+            for (const k of keys) on[k] = v;
+            render();
+          };
+          return h(
+            'div',
+            { class: 'fx-tag-row' },
+            h('div', { class: 'fx-tag-name' }, h('span', { class: `chip fx-pri-${pr.id}`, text: pr.label }), h('span', { class: 'fx-tag-count', text: `${n}/${keys.length}件オン` })),
+            btn('全部オン', { size: 'small', className: 'fx-tag-btn', onClick: set(true) }),
+            btn('全部オフ', { size: 'small', className: 'fx-tag-btn', onClick: set(false) })
+          );
+        }).filter(Boolean)
+      );
+      list.replaceChildren(
+        ...order.map((k, i) => {
+          const x = info.get(k);
+          return h(
+            'li',
+            { class: `pay-row${on[k] ? '' : ' is-off'}` },
+            h(
+              'button',
+              {
+                type: 'button',
+                class: `fx-switch${on[k] ? ' is-on' : ''}`,
+                role: 'switch',
+                'aria-checked': String(on[k]),
+                'aria-label': `「${x.name}」を取り崩しの対象にする`,
+                onClick: () => {
+                  on[k] = !on[k];
+                  render();
+                },
+              },
+              h('span', { class: 'fx-switch-knob' })
+            ),
+            h(
+              'div',
+              { class: 'pay-main fx-target-main' },
+              h('span', { class: 'pay-name' }, `${i + 1}. ${x.name}`),
+              h('span', { class: 'pay-meta' }, h('span', { class: `chip fx-pri-${x.priority}`, text: F.label(F.PRIORITIES, x.priority) }), h('span', { text: F.label(F.TAX_KINDS, x.taxKind) })),
+              h('span', { class: 'pay-amount', text: x.kind === 'asset' ? yen(x.value) : x.kind === 'saving' ? '積立でたまる分' : '戻した分' })
+            )
+          );
+        })
+      );
+    }
+    render();
+    add(
+      s.body,
+      tagBox,
+      list,
+      h(
+        'div',
+        { class: 'button-row' },
+        btn('並べ替え', {
+          size: 'small',
+          onClick: () =>
+            MT.forms.openReorderSheet({
+              title: '取り崩す順番',
+              description: '上にあるものから先に取り崩します。',
+              items: order.map((k) => ({ id: k, label: info.get(k).name, sub: F.label(F.PRIORITIES, info.get(k).priority), priority: info.get(k).priority })),
+              presets: [{ id: 'priority', label: '売却優先度の順に並べる', sort: (xs) => xs.map((x, i) => ({ x, i })).sort((a, b) => ['first', 'ifNeeded', 'keep'].indexOf(a.x.priority) - ['first', 'ifNeeded', 'keep'].indexOf(b.x.priority) || a.i - b.i).map((o) => o.x) }],
+              onSave: (ids) => {
+                order = ids;
+                render();
+              },
+            }),
+        }),
+        btn('既定に戻す', {
+          size: 'small',
+          variant: 'ghost',
+          onClick: () => {
+            const def = F.drawItems({ ...plan, drawdown: { ...plan.drawdown, order: null, targets: {} } });
+            order = def.map((x) => x.key);
+            for (const x of def) on[x.key] = x.on;
+            render();
+          },
+        })
+      ),
+      h('p', { class: 'hint', text: '並べ替えは「保存」で決まります。新しく足した資産は、売却優先度の位置で後ろに入ります。' })
+    );
+    formFoot(s, {
+      onSave: () => {
+        store.update((d) => F.updateDrawdown(d.future, planId, { order, targets: { ...on } }));
+        toast('取り崩す資産と順番を保存しました');
+        s.close();
+      },
+    });
+  }
+
   function openCashSheet(planId) {
     const plan = F.findPlan(store.get().future, planId);
     const d = store.get();
@@ -557,6 +700,8 @@
   }
 
   MT.futureUI = {
+    openDrawdownSheet,
+    openDrawTargetsSheet,
     yen,
     ymText,
     rowSpec,
