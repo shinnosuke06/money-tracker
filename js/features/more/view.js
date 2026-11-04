@@ -22,6 +22,11 @@
     );
   }
 
+  function monthEndText() {
+    const n = MT.monthEnd ? MT.monthEnd.needCount() : 0;
+    return n ? `要確認・未入力 ${n}件(月末記録・支払い・資産・在庫・副業・バックアップ)` : '月末の入力の確認(月末記録・支払い・資産・在庫・副業・バックアップ)';
+  }
+
   function render(container) {
     const d = store.get();
     const inv = d.inventory ? MT.inventoryModel.summary(d.inventory) : null;
@@ -33,6 +38,7 @@
         h(
           'ul',
           { class: 'more-list' },
+          entry('#/monthend', 'check', '月末チェック', monthEndText()),
           entry('#/inventory', 'box', '在庫(ポケカ)', inv && inv.rows.length ? `評価額 ${U.yen(inv.value)}円・${inv.rows.length}商品` : '商品の在庫・相場・売却の記録'),
           entry('#/future', 'trend', '将来予想', d.future && d.future.plans.length ? `ライフプラン ${d.future.plans.length}件・年ごとの表と取り崩し案` : 'ライフプラン・資産の将来予想・取り崩し案'),
           entry('#/settings', 'settings', '設定', 'バックアップ・価格の自動取得・旧アプリの取り込み')

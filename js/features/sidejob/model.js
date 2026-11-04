@@ -152,7 +152,7 @@
     return String(Math.round((Number(n) || 0)) / 10000);
   }
 
-  /** 内容の文章:選んだ項目を「項目名 + 万円の数」にして「、」でつなぐ(関スー 10,000円 → 「関スー1」) */
+  /** 内容の文章:選んだ項目を「項目名 + 万円の数」にして「、」でつなぐ(作業項目X 10,000円 → 「作業項目X1」) */
   function contentOf(items) {
     return items.map((x) => `${x.name}${manNumber(x.amount)}`).join('、');
   }

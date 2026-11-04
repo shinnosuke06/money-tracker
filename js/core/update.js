@@ -49,7 +49,10 @@
       reload,
       close
     );
-    reload.addEventListener('click', () => root.location.reload());
+    reload.addEventListener('click', () => {
+      if (MT.pwa) MT.pwa.applyWaiting(); // サービスワーカーの新しい版も入れ替える
+      root.location.reload();
+    });
     close.addEventListener('click', () => el.remove());
     rootEl.append(el);
     shown = version;

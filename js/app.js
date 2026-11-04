@@ -175,6 +175,13 @@
     render();
     // 新しい版が公開されたら知らせる(GitHub Pages などでファイルとして開いたとき)
     if (MT.update) MT.update.start();
+    // ホーム画面から開くアプリ:オフライン用のサービスワーカー(GitHub Pages などで開いたとき)
+    if (MT.pwa) {
+      MT.pwa.cleanUrl();
+      MT.pwa.register();
+    }
+    // 月末の入力の確認(前月の月末記録が未入力・未確認、バックアップが 30 日以上前のとき。1 日 1 回)
+    if (MT.monthEnd) MT.monthEnd.maybePrompt();
 
     if (res.status === 'corrupt') {
       toast('保存データが壊れていたため、空の状態で始めました(元のデータは別名で残しています)', { type: 'error', duration: 6000 });

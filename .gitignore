@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------
+# 実際のデータを公開リポジトリに入れないための除外
+# (アプリの書き出し・バックアップ・旧アプリのデータ・Excel の表など)
+# ---------------------------------------------------------------
+*.json
+*.txt
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.xlsm
+*.numbers
+*.ods
+*.zip
+*.7z
+*.bak
+*.backup
+*.sqlite
+*.db
+money-tracker-*
+
+# サンプル・テスト用に必要なファイルは「名前.sample.拡張子」にすれば除外されない(中身は架空のデータだけ)
+!*.sample.json
+!*.sample.csv
+!*.sample.tsv
+!*.sample.txt
+
+# OS・エディタ・道具
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+node_modules/
+__pycache__/

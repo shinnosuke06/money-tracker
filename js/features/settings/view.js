@@ -40,22 +40,9 @@
         h('h1', { class: 'page-title page-title-sub', text: '設定' })
       ),
 
-      themeCard(),
+      backupCard(lastExport, fileInput),
 
-      h(
-        'section',
-        { class: 'card' },
-        h('h2', { class: 'card-title', text: 'バックアップ' }),
-        h('p', { text: 'すべてのデータを JSON ファイルに書き出したり、書き出したファイルから読み込んだりできます。機種変更や、もしものときに備えて、ときどき書き出しておくと安心です。' }),
-        h(
-          'div',
-          { class: 'button-col' },
-          btn('JSON ファイルに書き出す', { icon: 'download', variant: 'primary', onClick: exportFlow }),
-          btn('JSON ファイルを読み込む', { icon: 'upload', onClick: () => fileInput.click() })
-        ),
-        fileInput,
-        h('p', { class: 'hint', text: lastExport ? `この端末で最後に書き出した日時:${formatDateTime(lastExport)}` : 'この端末ではまだ書き出していません。' })
-      ),
+      themeCard(),
 
       importCard(d),
 
@@ -149,6 +136,8 @@
         )
       ),
 
+      appCard(),
+
       h(
         'section',
         { class: 'card card-danger' },
@@ -157,7 +146,7 @@
         h('div', { class: 'button-col' }, btn('すべて削除する', { variant: 'danger', onClick: clearFlow }))
       ),
 
-      h('p', { class: 'app-version', text: 'マネートラッカー 段階4(ポケカ在庫・副業収入)+ Excel の取り込み' })
+      h('p', { class: 'app-version', text: `マネートラッカー ${store.APP_VERSION}(段階1〜6)` })
     );
   }
 
@@ -206,6 +195,61 @@
       seg.el,
       h('p', { class: 'hint', text: '「端末に合わせる」は、iPhone のライト/ダークの設定に合わせて自動で変わります。画面右上の丸いボタンでも、ライトとダークを 1 タップで切り替えられます。' }),
       h('p', { class: 'hint', text: '選んだテーマはこの端末にだけ保存し、データの書き出しには含めません。' })
+    );
+  }
+
+  /** バックアップ(いちばん上に、目立たせて置く) */
+  function backupCard(lastExport, fileInput) {
+    const b = MT.monthEndModel ? MT.monthEndModel.backupInfo(new Date(), lastExport) : { at: lastExport, days: null, stale: !lastExport };
+    const days = MT.monthEndModel ? MT.monthEndModel.BACKUP_DAYS : 30;
+    return h(
+      'section',
+      { class: 'card card-backup' },
+      h('h2', { class: 'card-title', text: 'バックアップ' }),
+      h('p', { text: 'すべてのデータを 1 つのファイル(JSON)に書き出します。機種変更や、もしものときに備えて、月に 1 回は書き出して「ファイル」アプリや iCloud Drive などに保存しておくと安心です。' }),
+      b.stale
+        ? h(
+            'div',
+            { class: 'notice notice-warn notice-compact' },
+            icon('alert', 'notice-icon'),
+            h('div', { class: 'notice-main' }, h('p', { class: 'notice-text', text: b.at ? `最後のバックアップから ${b.days}日たっています(${days}日以上)。書き出しておきましょう。` : 'まだバックアップしていません。書き出しておきましょう。' }))
+          )
+        : null,
+      h(
+        'div',
+        { class: 'button-col' },
+        btn('バックアップ(全データを書き出す)', { icon: 'download', variant: 'primary', onClick: exportFlow }),
+        btn('バックアップから戻す', { icon: 'upload', onClick: () => fileInput.click() })
+      ),
+      fileInput,
+      h('p', { class: 'hint', text: b.at ? `この端末で最後にバックアップした日時:${formatDateTime(b.at)}` : 'この端末ではまだバックアップしていません。' })
+    );
+  }
+
+  /** アプリ(ホーム画面から開く場合のオフライン・更新) */
+  function appCard() {
+    const st = MT.pwa ? MT.pwa.status() : { supported: false, offlineReady: false };
+    const offline = !st.supported ? 'この開き方では使えません(試用ページなど)' : st.offlineReady ? '電波がなくても開けます' : '準備中(次に開いたときから)';
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: 'アプリの更新' }),
+      h('dl', { class: 'info-list' }, infoRow('アプリの版', store.APP_VERSION), infoRow('オフライン', offline)),
+      h('p', { class: 'hint', text: '新しい版は、ふだんは次に開いたときに自動で入れ替わります。古い画面のままのときは「最新版に更新」を押してください。アプリのファイルだけを読み直し、データは消えません(インターネットに接続して行ってください)。' }),
+      h(
+        'div',
+        { class: 'button-col' },
+        Object.assign(
+          btn('最新版に更新', {
+            icon: 'sync',
+            onClick: async () => {
+              const ok = await MT.ui.confirmDialog({ title: '最新版に更新しますか?', message: ['アプリのファイルをネットから読み直します。データは消えません。'], okLabel: '更新する' });
+              if (ok) MT.pwa.forceUpdate();
+            },
+          }),
+          { disabled: !st.supported }
+        )
+      )
     );
   }
 

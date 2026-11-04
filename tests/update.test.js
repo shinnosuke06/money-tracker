@@ -40,3 +40,48 @@ test('index.html のスクリプトとスタイルに、いまの版の ?v= が�
   }
   assert.ok(local.some((u) => u.startsWith('js/core/update.js')));
 });
+
+// ---- サービスワーカー(sw.js) ----
+
+const vm = require('node:vm');
+function loadSw() {
+  const ctx = { self: { addEventListener() {}, location: { origin: 'https://example.invalid' } }, URL, console };
+  vm.createContext(ctx);
+  vm.runInContext(read('sw.js'), ctx);
+  return ctx;
+}
+
+test('sw.js の VERSION は APP_VERSION と同じ(版を上げると、ホーム画面のアプリも入れ替わる)', () => {
+  const m = /const VERSION = '([^']+)'/.exec(read('sw.js'));
+  assert.ok(m);
+  assert.equal(m[1], store.APP_VERSION);
+});
+
+test('sw.js は index.html のスクリプトとスタイルをすべてキャッシュに入れる(外の CDN は入れない)', () => {
+  const sw = loadSw();
+  const files = sw.filesIn(read('index.html'));
+  const html = read('index.html');
+  const local = [...html.matchAll(/<script src="([^"]+)"|<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1] || m[2]).filter((u) => !/^https?:/.test(u));
+  for (const u of local) assert.ok(files.includes(u), u);
+  assert.ok(files.every((u) => !/^https?:|^\/\//.test(u)));
+  // manifest・アイコンも
+  assert.ok(files.includes('manifest.webmanifest'));
+  const STATIC = vm.runInContext('STATIC', sw);
+  for (const f of STATIC.filter((x) => x !== './')) assert.ok(fs.existsSync(path.join(__dirname, '..', f)), f);
+});
+
+test('manifest:相対パス・standalone・アイコン(maskable を含む)がそろっている', () => {
+  const m = JSON.parse(read('manifest.webmanifest'));
+  assert.equal(m.start_url, './');
+  assert.equal(m.scope, './');
+  assert.equal(m.display, 'standalone');
+  assert.ok(m.name && m.short_name && m.theme_color && m.background_color);
+  for (const ic of m.icons) {
+    assert.ok(!ic.src.startsWith('/'), ic.src);
+    assert.ok(fs.existsSync(path.join(__dirname, '..', ic.src)), ic.src);
+  }
+  assert.ok(m.icons.some((ic) => ic.purpose === 'maskable'));
+  // index.html から読むファイルも、すべて相対パス
+  const html = read('index.html');
+  assert.equal(/(?:src|href)="\//.test(html), false);
+});
