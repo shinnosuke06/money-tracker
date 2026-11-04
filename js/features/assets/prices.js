@@ -4,9 +4,12 @@
  *      返事 { version: "v6", results: { コード: 価格 }, errors: [コード], errorDetails: { コード: 理由 } }
  *      version が "v6" でなければ「URLが古い、または別のものです」として、何も更新しない
  *  - 米国株:Finnhub の quote の c(ドル)。円は USD/JPY を掛けて出す(キーが無ければ手入力)
- *  - USD/JPY:① 上の URL に為替のコード(既定 USDJPY)も一緒に問い合わせる
- *            ② 取れなければ、キー不要の公開の為替レート(frankfurter.app、欧州中央銀行の基準値)に USD→JPY を問い合わせる
+ *  - USD/JPY:① 上の URL に為替のコード(既定 USDJPY)も一緒に問い合わせる(GAS が為替に対応していれば)
+ *            ② 取れなければ、キー不要の公開の為替レートに USD→JPY を問い合わせる
+ *               (a) Frankfurter(api.frankfurter.dev。欧州中央銀行の基準値。旧 api.frankfurter.app は移転)
+ *               (b) currency-api(jsDelivr で配信。毎日更新)
  *            ③ それも取れなければ設定の手入力値、④ 無ければ前回使った値のまま
+ *            取れなかった理由は、どこで・なぜかを結果に出す
  *    (Finnhub は米国株の株価(ドル)だけに使う)
  * 送るのは銘柄コードだけ(数量や金額は送らない)。URL とキーは MT.secrets から読む。
  * 取りに行って取れなかった銘柄と、コードが無い銘柄には理由を付ける(URL・キーが未設定のときは、お知らせだけ)。
@@ -19,7 +22,21 @@
 
   const VERSION = 'v6';
   const FINNHUB_QUOTE = 'https://finnhub.io/api/v1/quote'; // 公開 API の窓口(キーは設定から)
-  const PUBLIC_FX = 'https://api.frankfurter.app/latest?from=USD&to=JPY'; // キー不要の為替レート(欧州中央銀行の基準値。送るのは通貨の組み合わせだけ)
+  // キー不要の為替レート(送るのは通貨の組み合わせだけ)。上から順に試す
+  const PUBLIC_FX = [
+    {
+      name: 'Frankfurter',
+      label: '公開の為替レート(Frankfurter・欧州中央銀行の基準値',
+      url: 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY',
+      pick: (j) => ({ rate: toNum(j && j.rates && j.rates.JPY), date: j && j.date }),
+    },
+    {
+      name: 'currency-api',
+      label: '公開の為替レート(currency-api',
+      url: 'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json',
+      pick: (j) => ({ rate: toNum(j && j.usd && j.usd.jpy), date: j && j.date }),
+    },
+  ];
   const TIMEOUT_MS = 20000;
 
   const toNum = (v) => {
@@ -135,33 +152,42 @@
 
     // USD/JPY:① 価格取得の URL → ② 公開の為替レート → ③ 設定の手入力値 → ④ 前回使った値
     if (us.length) {
+      const tried = []; // 取れなかった所と理由
       let rate = gas && gas.results ? toNum(gas.results[fxCode]) : null;
       let from = null;
       if (!(rate > 0)) {
-        try {
-          const j = await getJson(PUBLIC_FX, doFetch, timeoutMs);
-          const v = toNum(j && j.rates && j.rates.JPY);
-          if (v > 0) {
-            rate = v;
-            from = `公開の為替レート(欧州中央銀行の基準値${j.date ? `・${j.date}` : ''})`;
+        if (gas) {
+          const d = gas.errorDetails && gas.errorDetails[fxCode];
+          tried.push(`価格取得のURL:${fxCode} を返しませんでした(GAS が為替に対応していない可能性があります${d ? `。${String(d).slice(0, 60)}` : ''})`);
+        } else if (secrets.priceUrl) tried.push('価格取得のURL:通信できませんでした');
+        for (const src of PUBLIC_FX) {
+          try {
+            const got = src.pick(await getJson(src.url, doFetch, timeoutMs));
+            if (got.rate > 0) {
+              rate = got.rate;
+              from = `${src.label}${got.date ? `・${got.date}` : ''})`;
+              break;
+            }
+            tried.push(`${src.name}:返事に USD/JPY がありません`);
+          } catch (e) {
+            tried.push(`${src.name}:${errorText(e)}`);
           }
-        } catch (e) {
-          /* 次の方法へ */
         }
       }
       const prev = assets.fx && assets.fx.rate > 0 ? assets.fx.rate : null;
+      const why = tried.length ? `(${tried.join(' / ')})` : '';
       if (rate > 0) {
         report.fx = { rate, source: 'auto' };
         if (from) report.messages.push(`USD/JPY:${from}の ${rate} を使いました`);
       } else if (s.fxManual > 0) {
         report.fx = { rate: s.fxManual, source: 'manual' };
-        report.messages.push(`USD/JPY:自動で取得できなかったため、設定の値(${s.fxManual})を使いました`);
+        report.messages.push(`USD/JPY:自動で取得できなかったため、設定の値(${s.fxManual})を使いました${why}`);
       } else if (prev) {
         report.fx = null; // 前回の値をそのまま使う(日時は変えない)
-        report.messages.push(`USD/JPY:取得できなかったため、前回の値(${prev})のまま計算します`);
+        report.messages.push(`USD/JPY:取得できなかったため、前回の値(${prev})のまま計算します${why}`);
       } else {
         report.fx = { rate: null, source: null };
-        report.messages.push('USD/JPY:取得できず、設定の手入力値も無いため、米国株は円に換算できません(価格未取得になります)。設定の「USD/JPY(手入力)」に入れてください。Finnhub は米国株の株価(ドル)だけに使います');
+        report.messages.push(`USD/JPY:取得できず、設定の手入力値も無いため、米国株は円に換算できません(価格未取得になります)。設定の「USD/JPY(手入力)」に入れてください。Finnhub は米国株の株価(ドル)だけに使います${why}`);
       }
     }
 
@@ -201,5 +227,5 @@
     return { ok, failed };
   }
 
-  MT.assetPrices = { VERSION, fetchPrices, countReport };
+  MT.assetPrices = { VERSION, PUBLIC_FX, fetchPrices, countReport };
 })(typeof window !== 'undefined' ? window : globalThis);

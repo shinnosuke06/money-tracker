@@ -85,3 +85,11 @@ test('manifest:相対パス・standalone・アイコン(maskable を含む)が�
   const html = read('index.html');
   assert.equal(/(?:src|href)="\//.test(html), false);
 });
+
+test('sw.js は版を固定した部品(Chart.js・lz-string)だけをとっておき、為替(currency-api@latest)はとっておかない', () => {
+  const sw = loadSw();
+  const re = vm.runInContext('PINNED_LIBS', sw);
+  assert.ok(re.test('/npm/chart.js@4.5.1/dist/chart.umd.min.js'));
+  assert.ok(re.test('/npm/lz-string@1.5.0/libs/lz-string.min.js'));
+  assert.equal(re.test('/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json'), false);
+});

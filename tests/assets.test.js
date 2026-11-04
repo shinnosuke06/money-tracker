@@ -232,6 +232,42 @@ test('価格の自動取得:USD/JPY は URL → 公開の為替レート → 手
   assert.ok(r4.messages.some((m) => m.includes('USD/JPY(手入力)')));
 });
 
+test('価格の自動取得:USD/JPY の公開の為替レートは Frankfurter(新しい場所)→ currency-api の順。取れない理由をどこで・なぜか出す', async () => {
+  const { a } = fixture();
+  a.settings.fxManual = 147;
+  assert.ok(PR.PUBLIC_FX[0].url.startsWith('https://api.frankfurter.dev/v1/'));
+  assert.ok(!PR.PUBLIC_FX.some((x) => x.url.includes('frankfurter.app')));
+  const asked = [];
+  const fake = ({ frank, cur }) => async (url) => {
+    asked.push(url);
+    if (url.includes('finnhub')) return { ok: true, json: async () => ({ c: 100 }) };
+    if (url.includes('frankfurter')) {
+      if (frank === 'offline') throw new TypeError('Failed to fetch');
+      return frank ? { ok: true, json: async () => ({ base: 'USD', date: '2026-11-13', rates: { JPY: frank } }) } : { ok: false, status: 503 };
+    }
+    if (url.includes('currency-api')) return cur ? { ok: true, json: async () => ({ date: '2026-11-14', usd: { jpy: cur } }) } : { ok: false, status: 404 };
+    return { ok: true, json: async () => ({ version: 'v6', results: { X101: 1800 }, errors: ['USDJPY'], errorDetails: { USDJPY: 'SBI_HISTORY(HTTP404)' } }) };
+  };
+  // Frankfurter が通信できなければ、currency-api
+  const r1 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: fake({ frank: 'offline', cur: 153.25 }) });
+  assert.deepEqual(r1.fx, { rate: 153.25, source: 'auto' });
+  assert.ok(r1.messages.some((m) => m.includes('currency-api') && m.includes('2026-11-14')));
+  // 両方だめなら手入力。理由に GAS・Frankfurter・currency-api が並ぶ
+  const r2 = await PR.fetchPrices({ assets: a, secrets: { priceUrl: URL_OK, finnhubKey: 'k' }, fetchImpl: fake({ frank: null, cur: null }) });
+  assert.deepEqual(r2.fx, { rate: 147, source: 'manual' });
+  const msg = r2.messages.find((m) => m.startsWith('USD/JPY'));
+  assert.ok(msg.includes('価格取得のURL:USDJPY を返しませんでした') && msg.includes('Frankfurter:取得できませんでした(HTTP 503)') && msg.includes('currency-api:取得できませんでした(HTTP 404)'), msg);
+  // 価格取得の URL が USDJPY を返せば、公開の為替レートには聞かない
+  asked.length = 0;
+  const r3 = await PR.fetchPrices({
+    assets: a,
+    secrets: { priceUrl: URL_OK, finnhubKey: 'k' },
+    fetchImpl: async (url) => (url.includes('finnhub') ? { ok: true, json: async () => ({ c: 100 }) } : { ok: true, json: async () => ({ version: 'v6', results: { X101: 1800, USDJPY: 150.5 }, errors: [], errorDetails: {} }) }),
+  });
+  assert.deepEqual(r3.fx, { rate: 150.5, source: 'auto' });
+  assert.ok(!asked.some((u) => u.includes('frankfurter') || u.includes('currency-api')));
+});
+
 test('価格の自動取得:コードが無い銘柄は取りに行かず、理由を付ける(証券会社の違いは関係しない)', async () => {
   const { a } = fixture();
   A.saveHolding(a, { id: 'nocode', broker: '証券C', account: 'tokutei', type: 'fund', code: '', name: 'ファンドZ', quantity: 1, avgPrice: 10000 });

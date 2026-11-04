@@ -12,10 +12,11 @@
  * - それ以外(価格取得の URL・為替・新しい版の確認 ?check=)は何もしない(そのままネットへ。キャッシュしない)
  * データ(localStorage)には触らない。
  */
-const VERSION = '2026.11.04-6';
+const VERSION = '2026.11.04-7';
 const CACHE = `money-tracker-${VERSION}`;
 const LIBS = 'money-tracker-libs-v1';
 const LIB_HOST = 'cdn.jsdelivr.net';
+const PINNED_LIBS = /^\/npm\/(chart\.js|lz-string)@\d/; // 版を固定した部品だけ
 const STATIC = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-32.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 
 /** index.html に書いてあるスクリプトとスタイルの場所(同じ場所のものだけ) */
@@ -62,8 +63,8 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // グラフなどの部品(版を固定した CDN):キャッシュを先に
-  if (url.hostname === LIB_HOST) {
+  // グラフなどの部品(版を固定した CDN):キャッシュを先に。為替(currency-api@latest)などはとっておかない
+  if (url.hostname === LIB_HOST && PINNED_LIBS.test(url.pathname)) {
     event.respondWith(
       (async () => {
         const cache = await caches.open(LIBS);
@@ -76,7 +77,7 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-  // ほかの場所(価格取得・為替)と、新しい版の確認は触らない
+  // ほかの場所(価格取得・為替・版を固定していない CDN のファイル)と、新しい版の確認は触らない
   if (url.origin !== self.location.origin || url.searchParams.has('check')) return;
 
   // 画面:ネットを先に。つながらなければキャッシュの index.html
