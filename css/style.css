@@ -4007,3 +4007,36 @@ html.is-shot .theme-toggle {
   min-width: 44px;
   min-height: 40px;
 }
+
+/* ---------------------------------------------------------------
+   総資産の履歴を直す(js/features/assets/history.js)
+   --------------------------------------------------------------- */
+a.btn {
+  text-decoration: none;
+}
+.chip-warn {
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+}
+.pay-row.is-flagged {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+.hist-filter {
+  margin-bottom: 10px;
+}
+.hist-near p {
+  margin: 0;
+}
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-size: 12px;
+  font-weight: 700;
+}

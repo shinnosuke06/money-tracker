@@ -349,7 +349,7 @@ test('取り崩しの設定:既定は「不足分だけ」。v8 のプランを�
   v8.schemaVersion = 8;
   const res = store.prepare(JSON.parse(JSON.stringify(v8)));
   assert.equal(res.ok, true);
-  assert.equal(res.data.schemaVersion, 9);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
   assert.equal(res.data.future.plans[0].drawdown.method, 'shortfall');
   assert.deepEqual(F.simulate(res.data.future.plans[0], 0).summary, F.simulate(p, 0).summary);
 });

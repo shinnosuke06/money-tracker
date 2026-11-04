@@ -418,3 +418,152 @@ test('サンプル:資産管理も入っていて、集計が一致する', () =
   assert.ok(A.reflectPlan(d, '2026-11').rows.length >= 1);
   for (const h of a.holdings) assert.ok(!/^\d{4}$/.test(h.code), '実在しうる 4 桁コードは使わない');
 });
+
+// ---- 総資産の履歴を直す・削除・元に戻す(架空の金額) ----
+
+function histAssets(entries) {
+  const a = A.create();
+  a.history = entries.map(([date, total, missing = 0]) => ({ date, total, gain: null, byBroker: {}, missing }));
+  return a;
+}
+
+test('履歴:v9 のデータを開くと、今の履歴はそのままで「削除・修正前の履歴」が空で入る', () => {
+  const v9 = store.createEmpty(NOW);
+  v9.schemaVersion = 9;
+  v9.assets.history = [{ date: '2026-11-01', total: 1000000, gain: 10000, byBroker: { 証券A: 1000000 }, missing: 0 }];
+  delete v9.assets.historyTrash;
+  const res = store.prepare(JSON.parse(JSON.stringify(v9)));
+  assert.equal(res.ok, true);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
+  assert.deepEqual(res.data.assets.history, v9.assets.history);
+  assert.deepEqual(res.data.assets.historyTrash, []);
+});
+
+test('履歴を直す:金額を直すと「手で修正」の印が付き、直す前は控えに残る。控えから元に戻せる', () => {
+  const a = histAssets([
+    ['2026-11-01', 1000000],
+    ['2026-11-02', 300000],
+    ['2026-11-03', 1010000],
+  ]);
+  const r = A.editHistory(a, '2026-11-02', { date: '2026-11-02', total: 1005000 }, NOW);
+  assert.deepEqual(r, { ok: true, changed: true, date: '2026-11-02' });
+  assert.equal(a.history[1].total, 1005000);
+  assert.equal(a.history[1].edited, true);
+  assert.equal(a.historyTrash.length, 1);
+  assert.equal(a.historyTrash[0].reason, 'edited');
+  assert.equal(a.historyTrash[0].entry.total, 300000);
+
+  // 同じ日の記録があるので、置き換えるかどうかを聞く(そのままでは戻さない)
+  const tid = a.historyTrash[0].id;
+  const c = A.restoreHistory(a, tid, {}, NOW);
+  assert.equal(c.ok, false);
+  assert.equal(c.conflict.total, 1005000);
+  assert.equal(a.history[1].total, 1005000);
+  // 置き換える:直した記録は「置き換え前」として残る
+  const ok = A.restoreHistory(a, tid, { replace: true }, NOW);
+  assert.deepEqual(ok, { ok: true, date: '2026-11-02', replaced: true });
+  assert.equal(a.history[1].total, 300000);
+  assert.equal(a.history[1].edited, undefined);
+  assert.equal(a.historyTrash.length, 1);
+  assert.equal(a.historyTrash[0].reason, 'replaced');
+  assert.equal(a.historyTrash[0].entry.total, 1005000);
+});
+
+test('履歴を直す:日付の変更・同じ日付の重なり・先の日付・負の金額・変更なし', () => {
+  const a = histAssets([
+    ['2026-11-01', 1000000],
+    ['2026-11-05', 1020000],
+  ]);
+  const moved = A.editHistory(a, '2026-11-05', { date: '2026-11-03', total: 1020000 }, NOW);
+  assert.equal(moved.ok, true);
+  assert.deepEqual(a.history.map((e) => e.date), ['2026-11-01', '2026-11-03']);
+  const dup = A.editHistory(a, '2026-11-03', { date: '2026-11-01', total: 1 }, NOW);
+  assert.equal(dup.ok, false);
+  assert.match(dup.error, /すでにあります/);
+  assert.equal(A.editHistory(a, '2026-11-03', { date: '2026-11-16', total: 1 }, NOW).ok, false); // NOW は 11/15
+  assert.equal(A.editHistory(a, '2026-11-03', { date: '2026-11-03', total: -1 }, NOW).ok, false);
+  assert.equal(A.editHistory(a, '2026-11-03', { date: '2026-13-01', total: 1 }, NOW).ok, false);
+  assert.equal(A.editHistory(a, '2026-10-01', { date: '2026-10-01', total: 1 }, NOW).ok, false);
+  const before = a.historyTrash.length;
+  assert.deepEqual(A.editHistory(a, '2026-11-01', { date: '2026-11-01', total: 1000000 }, NOW), { ok: true, changed: false, date: '2026-11-01' });
+  assert.equal(a.historyTrash.length, before);
+});
+
+test('履歴の削除:控えへ移り、元に戻すと日付順の位置に戻る。同じ日に新しい記録があれば置き換えを聞く', () => {
+  const a = histAssets([
+    ['2026-11-01', 1000000],
+    ['2026-11-02', 50],
+    ['2026-11-03', 1010000],
+  ]);
+  assert.equal(A.removeHistory(a, ['2026-11-02'], NOW), 1);
+  assert.deepEqual(a.history.map((e) => e.date), ['2026-11-01', '2026-11-03']);
+  assert.equal(a.historyTrash[0].reason, 'deleted');
+  assert.equal(a.historyTrash[0].at, NOW.toISOString());
+  const back = A.restoreHistory(a, a.historyTrash[0].id, {}, NOW);
+  assert.deepEqual(back, { ok: true, date: '2026-11-02', replaced: false });
+  assert.deepEqual(a.history.map((e) => e.date), ['2026-11-01', '2026-11-02', '2026-11-03']);
+  assert.equal(a.historyTrash.length, 0);
+
+  // 削除のあと、同じ日に「価格を更新」で新しい記録ができた場合
+  const { a: fa } = fixture();
+  A.saveHistory(fa, '2026-11-15');
+  A.removeHistory(fa, '2026-11-15', NOW);
+  A.saveHistory(fa, '2026-11-15');
+  const tid = fa.historyTrash[0].id;
+  assert.equal(A.restoreHistory(fa, tid, {}, NOW).ok, false);
+  assert.equal(A.restoreHistory(fa, tid, { replace: true }, NOW).replaced, true);
+  assert.equal(fa.history.length, 1);
+  assert.equal(fa.historyTrash.length, 1);
+  assert.equal(A.restoreHistory(fa, 'no-such-id', {}, NOW).ok, false);
+});
+
+test('削除・修正前の履歴:1 件ずつ・全部を完全に消せる。最大件数を超えたら古いものから消える', () => {
+  const a = histAssets([
+    ['2026-11-01', 1000],
+    ['2026-11-02', 2000],
+    ['2026-11-03', 3000],
+  ]);
+  A.removeHistory(a, ['2026-11-01', '2026-11-02', '2026-11-03'], NOW);
+  assert.equal(a.historyTrash.length, 3);
+  assert.equal(A.purgeTrash(a, a.historyTrash[0].id), 1);
+  assert.equal(a.historyTrash.length, 2);
+  assert.equal(A.purgeTrash(a), 2);
+  assert.deepEqual(a.historyTrash, []);
+
+  const many = histAssets(Array.from({ length: A.TRASH_MAX + 5 }, (_, i) => [`2026-0${1 + Math.floor(i / 28) % 9}-${String((i % 28) + 1).padStart(2, '0')}`, 1000 + i]));
+  const dates = many.history.map((e) => e.date);
+  A.removeHistory(many, dates, NOW);
+  assert.equal(many.historyTrash.length, A.TRASH_MAX);
+});
+
+test('要確認の目印:前後より飛び出た記録・急な増減・価格未取得が増えた記録・0 円(戻っただけの記録には付けない)', () => {
+  const a = histAssets([
+    ['2026-11-01', 1000000],
+    ['2026-11-02', 1010000],
+    ['2026-11-03', 400000], // 落ち込み(前後より低い)
+    ['2026-11-04', 1020000], // 元に戻っただけ(目印なし)
+    ['2026-11-05', 1500000], // 前回から急に増加(次がないので「飛び出た」ではない)
+    ['2026-11-06', 1490000, 2], // 価格未取得が前回より多い
+    ['2026-11-07', 0],
+  ]);
+  const f = A.historyFlags(a);
+  assert.deepEqual([...f.keys()], ['2026-11-03', '2026-11-05', '2026-11-06', '2026-11-07']);
+  assert.equal(f.get('2026-11-03')[0].id, 'spike');
+  assert.match(f.get('2026-11-03')[0].text, /前後より低い/);
+  assert.equal(f.get('2026-11-05')[0].id, 'jump');
+  assert.equal(f.get('2026-11-06')[0].id, 'missing');
+  assert.equal(f.get('2026-11-07')[0].id, 'zero');
+  // ふだんの増減(数 % )には付けない
+  assert.equal(A.historyFlags(histAssets([['2026-11-01', 1000000], ['2026-11-02', 1030000], ['2026-11-03', 990000]])).size, 0);
+});
+
+test('履歴:読み込み時に「手で修正」の印を残し、形のおかしい控えは捨てる', () => {
+  const a = A.normalize({
+    history: [{ date: '2026-11-01', total: 1000, edited: true }, { date: '2026-11-02', total: 2000, edited: 'yes' }],
+    historyTrash: [{ id: 't1', reason: 'edited', at: NOW.toISOString(), entry: { date: '2026-11-01', total: 900 } }, { id: 't2', entry: { date: 'bad' } }, { id: 't3' }, { id: 't1', entry: { date: '2026-11-03', total: 1 } }],
+  });
+  assert.equal(a.history[0].edited, true);
+  assert.equal('edited' in a.history[1], false);
+  assert.equal(a.historyTrash.length, 1);
+  assert.equal(a.historyTrash[0].entry.total, 900);
+});

@@ -18,16 +18,17 @@
  *   v6 → v7:支払いの並び(引き落とし日順 / 自分で並べた順)を追加(js/features/payments/model.js)
  *   v7 → v8:将来予想(future)の区画を追加(js/features/future/model.js)
  *   v8 → v9:将来予想のプランに、取り崩しの設定(drawdown)を追加(js/features/future/model.js)
+ *   v9 → v10:資産の履歴に、削除・修正前の履歴(historyTrash)と「手で直した」印を追加(js/features/assets/model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 9;
+  const SCHEMA_VERSION = 10;
   // アプリの版。設定に出し、新しい版の確認(js/core/update.js)にも使う。
   // 変更を出すたびに上げ、index.html の各ファイルの ?v= も同じ値にそろえる(テストで確かめる)
-  const APP_VERSION = '2026.11.04-7';
+  const APP_VERSION = '2026.11.04-8';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

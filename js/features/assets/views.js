@@ -5,6 +5,7 @@
  *   #/assets/manual     手入力の資産
  *   #/assets/summary    集計(証券会社別・口座区分別・種別別・NISA 枠・含み益・売却優先度)
  *   #/assets/dividends  配当・優待(月別カレンダー)
+ *   #/assets/history    総資産の履歴を直す(js/features/assets/history.js)
  */
 (function (root) {
   'use strict';
@@ -166,13 +167,21 @@
     container.append(pieCard('証券会社別', 'assets-pie-broker', brokerParts), pieCard('種別', 'assets-pie-kind', kindParts));
 
     // 推移
+    const histFlags = A.historyFlags(a);
     const histCanvas = h('canvas', { role: 'img', 'aria-label': '総資産の推移の折れ線グラフ' });
     const histFallback = h('p', { class: 'chart-fallback', hidden: true, text: 'グラフを読み込めませんでした。インターネットに接続して、もう一度開いてください。' });
     container.append(
       h(
         'section',
         { class: 'card chart-card' },
-        h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: '総資産の推移' })),
+        h(
+          'div',
+          { class: 'card-head' },
+          h('h2', { class: 'card-title', text: '総資産の推移' }),
+          a.history.length || a.historyTrash.length
+            ? h('div', { class: 'card-head-side' }, h('a', { class: 'btn btn-secondary btn-small', href: '#/assets/history' }, h('span', { text: '履歴を直す' }), histFlags.size ? h('span', { class: 'count-badge', text: `要確認 ${histFlags.size}` }) : null))
+            : null
+        ),
         a.history.length ? h('div', { class: 'chart-box' }, histCanvas, histFallback) : h('p', { class: 'hint', text: '「価格を更新」を押すたびに、その日の総資産を記録します(同じ日は上書き)。' })
       )
     );
