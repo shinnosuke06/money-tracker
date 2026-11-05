@@ -54,8 +54,19 @@
     });
   }
 
+  /** 吹き出しの中で折り返す(全角で 16 文字ほど・最大 6 行) */
+  function wrapLines(text, n = 16, max = 6) {
+    const out = [];
+    for (const line of String(text).split('\n')) {
+      const chars = [...line];
+      if (!chars.length) continue;
+      for (let i = 0; i < chars.length; i += n) out.push(chars.slice(i, i + n).join(''));
+    }
+    return out.length > max ? [...out.slice(0, max - 1), `${out[max - 1].slice(0, n - 1)}…`] : out;
+  }
+
   /**
-   * 総資産の推移(日付ごと。直近 120 件)
+   * 総資産の推移(日付ごと。直近 120 件)。コメントのある日は ◆ の点にし、吹き出しにコメントを出す
    * @param {{marks?: Set<string>, onPick?: (date: string) => void}} opts
    *   marks:目印を付ける日付(赤い点)/ onPick:点を押したとき(その日の日付を渡す)
    */
@@ -65,6 +76,7 @@
       const pts = entries.slice(-120);
       const many = pts.length > 40;
       const marked = pts.map((e) => marks.has(e.date));
+      const memo = pts.map((e) => !!e.memo);
       const labels = pts.map((e, i) => {
         const [y, m, d] = e.date.split('-').map(Number);
         return i === 0 || (m === 1 && d <= 7) ? [`${m}/${d}`, `${y}`] : `${m}/${d}`;
@@ -80,8 +92,9 @@
               borderColor: c.series[0],
               backgroundColor: c.series[0],
               borderWidth: 2,
-              pointRadius: marked.map((m) => (m ? 5 : many ? 0 : 4)),
-              pointHoverRadius: marked.map((m) => (m ? 6 : 5)),
+              pointRadius: marked.map((m, i) => (memo[i] ? 7 : m ? 5 : many ? 0 : 4)),
+              pointHoverRadius: marked.map((m, i) => (memo[i] ? 8 : m ? 6 : 5)),
+              pointStyle: memo.map((x) => (x ? 'rectRot' : 'circle')),
               pointBackgroundColor: marked.map((m) => (m ? c.negative : c.series[0])),
               pointBorderColor: c.surface,
               pointBorderWidth: 2,
@@ -105,6 +118,7 @@
             tooltip: C.tooltip(c, {
               title: (items) => (items.length ? pts[items[0].dataIndex].date.replace(/-/g, '/') : ''),
               label: (item) => ` 総資産: ${U.yen(item.raw)}円${marked[item.dataIndex] ? '(要確認)' : ''}`,
+              afterBody: (items) => (items.length && pts[items[0].dataIndex].memo ? ['', ...wrapLines(pts[items[0].dataIndex].memo)] : []),
             }),
           },
           scales: { ...C.scales(c), y: { ...C.scales(c).y, beginAtZero: false } },
@@ -113,5 +127,5 @@
     });
   }
 
-  MT.assetsCharts = { doughnut, history, destroy: C.destroy };
+  MT.assetsCharts = { doughnut, history, wrapLines, destroy: C.destroy };
 })(window);

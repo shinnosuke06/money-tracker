@@ -4039,4 +4039,30 @@ a.btn {
   color: var(--warn-ink);
   font-size: 12px;
   font-weight: 700;
+}.hist-memo {
+  display: flex;
+  gap: 4px;
+  flex-basis: 100%;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.hist-memo-mark {
+  flex: none;
+  color: var(--accent-text);
+  font-size: 10px;
+  line-height: 19px;
+}
+.hist-memo-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+  word-break: break-all;
+}
+.hist-memo-count {
+  margin-top: -4px;
+  text-align: right;
 }

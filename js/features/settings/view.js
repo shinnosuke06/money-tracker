@@ -277,6 +277,11 @@
     const fxManual = MT.ui.amountField({ value: set.fxManual, decimals: 4, unit: '円', label: 'USD/JPY(手入力)', compact: true });
     const tax = MT.ui.amountField({ value: Math.round(set.taxRate * 100000) / 1000, decimals: 3, unit: '%', label: '税率', compact: true });
     const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+    const autoBox = MT.forms.checkbox('アプリを開いたときに、価格を自動で更新する', MT.assetsAuto ? MT.assetsAuto.enabled() : false);
+    autoBox.input.addEventListener('change', () => {
+      MT.assetsAuto.setEnabled(autoBox.input.checked);
+      toast(autoBox.input.checked ? '開いたときの自動更新をオンにしました' : '開いたときの自動更新をオフにしました');
+    });
 
     function save() {
       err.hidden = true;
@@ -327,6 +332,8 @@
         h('div', { class: 'form-2col' }, field('為替のコード', fxCode), field('USD/JPY(手入力)', fxManual.el)),
         h('p', { class: 'form-hint', text: 'USD/JPY は、上の URL に為替のコードも一緒に問い合わせ、無ければキー不要の公開の為替レートを使います(Finnhub は米国株の株価だけ)。どちらも取れないとき(試用ページなど外に接続できない場所)は、手入力の値を使います。' }),
         field('税率(課税口座の含み益・配当)', tax.el, '既定は 20.315%。NISA は 0% として計算します。'),
+        autoBox.el,
+        h('p', { class: 'form-hint', text: `アプリを開いたときや、ほかのアプリから戻ってきたときに、前回の更新から ${A.AUTO_MIN_MINUTES} 分以上たっていたら価格を取りに行きます。結果は画面の下に短く出ます(この端末だけの設定)。` }),
         err
       ),
       h('p', { class: 'hint', text: 'URL とキーはこの端末の中だけに保存し、JSON の書き出しには含めません(書き出すときに含めることもできます)。送るのは銘柄コードだけで、数量や金額は送りません。' }),

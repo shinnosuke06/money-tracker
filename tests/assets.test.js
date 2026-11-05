@@ -567,3 +567,75 @@ test('履歴:読み込み時に「手で修正」の印を残し、形のおか�
   assert.equal(a.historyTrash.length, 1);
   assert.equal(a.historyTrash[0].entry.total, 900);
 });
+
+// ---- その日のコメント・開いたときの自動更新(架空のデータ) ----
+
+test('コメント:書く・前後の空白を取る・最大 200 文字・空で消す。記録の無い日には書けない', () => {
+  const a = histAssets([['2026-11-01', 1000000]]);
+  assert.equal(A.setHistoryMemo(a, '2026-11-01', '  銘柄Xを100株買った\n相場が下がった  '), true);
+  assert.equal(a.history[0].memo, '銘柄Xを100株買った\n相場が下がった');
+  A.setHistoryMemo(a, '2026-11-01', 'あ'.repeat(A.HISTORY_MEMO_MAX + 50));
+  assert.equal(a.history[0].memo.length, A.HISTORY_MEMO_MAX);
+  A.setHistoryMemo(a, '2026-11-01', '   ');
+  assert.equal('memo' in a.history[0], false);
+  assert.equal(A.setHistoryMemo(a, '2026-10-01', 'x'), false);
+  // 読み込み時も同じ(文字列以外・空は捨てる)
+  const n = A.normalize({ history: [{ date: '2026-11-01', total: 1, memo: ' メモ ' }, { date: '2026-11-02', total: 1, memo: 123 }, { date: '2026-11-03', total: 1, memo: '' }] });
+  assert.deepEqual(n.history.map((e) => e.memo), ['メモ', undefined, undefined]);
+});
+
+test('コメント:同じ日に価格を更新し直しても引き継ぐ。手で直した記録を上書きするときは「置き換え前」に残す', () => {
+  const { a } = fixture();
+  const T = new Date(2026, 10, 15, 9, 0);
+  A.saveHistory(a, '2026-11-15', T);
+  A.setHistoryMemo(a, '2026-11-15', '銘柄Xを買い増し');
+  A.editHistory(a, '2026-11-15', { date: '2026-11-15', total: 123456 }, T);
+  assert.equal(a.history[0].memo, '銘柄Xを買い増し');
+  const before = a.historyTrash.length;
+  A.saveHistory(a, '2026-11-15', T);
+  assert.equal(a.history.length, 1);
+  assert.equal(a.history[0].memo, '銘柄Xを買い増し');
+  assert.equal(a.history[0].edited, undefined);
+  assert.notEqual(a.history[0].total, 123456);
+  assert.equal(a.historyTrash.length, before + 1);
+  assert.equal(a.historyTrash[0].reason, 'replaced');
+  assert.equal(a.historyTrash[0].entry.total, 123456);
+  assert.equal(a.historyTrash[0].entry.memo, '銘柄Xを買い増し');
+  // 手で直していない記録の上書きは、控えを作らない
+  A.saveHistory(a, '2026-11-15', T);
+  assert.equal(a.historyTrash.length, before + 1);
+  // 削除して戻しても、コメントは残る
+  A.removeHistory(a, '2026-11-15', T);
+  A.restoreHistory(a, a.historyTrash[0].id, {}, T);
+  assert.equal(a.history[0].memo, '銘柄Xを買い増し');
+});
+
+test('コメント:v10 のデータを開いても、履歴とコメントはそのまま', () => {
+  const v10 = store.createEmpty(NOW);
+  v10.schemaVersion = 10;
+  v10.assets.history = [{ date: '2026-11-01', total: 1000000, gain: null, byBroker: {}, missing: 0, memo: '架空のメモ' }];
+  const res = store.prepare(JSON.parse(JSON.stringify(v10)));
+  assert.equal(res.ok, true);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
+  assert.equal(res.data.assets.history[0].memo, '架空のメモ');
+});
+
+test('開いたときの自動更新:取りに行ける銘柄があり、前回から 30 分以上たっているときだけ', () => {
+  const T = new Date(2026, 10, 15, 12, 0);
+  const ago = (min) => new Date(T.getTime() - min * 60000).toISOString();
+  const a = A.create();
+  const sec = { priceUrl: URL_OK };
+  assert.equal(A.autoUpdateDue(a, { secrets: sec, now: T }), false); // 銘柄なし
+  A.saveHolding(a, { broker: '証券A', account: 'tokutei', type: 'jp', code: 'X101', name: '銘柄X', quantity: 1, avgPrice: 1 });
+  assert.equal(A.autoUpdateDue(a, { secrets: {}, now: T }), false); // URL なし
+  assert.equal(A.autoUpdateDue(a, { secrets: sec, now: T }), true); // 一度も更新していない
+  a.lastUpdateAt = ago(10);
+  assert.equal(A.autoUpdateDue(a, { secrets: sec, now: T }), false);
+  a.lastUpdateAt = ago(A.AUTO_MIN_MINUTES);
+  assert.equal(A.autoUpdateDue(a, { secrets: sec, now: T }), true);
+  // 米国株だけなら Finnhub のキーが要る
+  const u = A.create();
+  A.saveHolding(u, { broker: '証券B', account: 'tokutei', type: 'us', code: 'XUS', name: '米国銘柄', quantity: 1, avgPrice: 1 });
+  assert.equal(A.autoUpdateDue(u, { secrets: sec, now: T }), false);
+  assert.equal(A.autoUpdateDue(u, { secrets: { finnhubKey: 'dummy' }, now: T }), true);
+});
