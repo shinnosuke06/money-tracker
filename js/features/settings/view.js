@@ -342,6 +342,7 @@
         { class: 'button-row' },
         btn('保存', { variant: 'primary', onClick: save }),
         btn('月末記録への反映先', { onClick: () => MT.assetsUI.openReflectMappingSheet() }),
+        h('a', { class: 'btn btn-secondary', href: '#/assets/changes' }, h('span', { text: '分割・配当の確認' })),
         MT.secrets.has() ? btn('URLとキーを消す', { variant: 'ghost', className: 'btn-ghost-danger', onClick: clearSecrets }) : null
       )
     );
