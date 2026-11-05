@@ -275,9 +275,11 @@
         done: done.input.checked,
         memo: memo.value,
       };
-      if (store.update((dd) => P.saveIncome(dd.payments, income))) {
+      const report = {};
+      if (store.update((dd) => P.saveIncome(dd.payments, income, U.todayStr(), report))) {
         s.close();
-        toast(src ? '保存しました' : '入金予定を追加しました');
+        const msg = P.creditMessage(store.get(), report);
+        toast(`${src ? '保存しました' : '入金予定を追加しました'}${msg ? `。${msg}` : ''}`, msg ? { duration: 4200 } : undefined);
       }
     }
 

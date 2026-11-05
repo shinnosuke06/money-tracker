@@ -4158,3 +4158,7 @@ s.was {
 .chg-actions {
   margin-top: 8px;
 }
+.chip-in {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
