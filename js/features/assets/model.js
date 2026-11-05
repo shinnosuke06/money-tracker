@@ -18,8 +18,9 @@
  *   }],
  *   manual: [{ id, name, category, value, cost, updatedAt, sellPriority, memo }],
  *       // 手入力の資産。含み損益 = value − cost
- *   history: [{ date: "YYYY-MM-DD", total, gain, byBroker: { 名前: 円 }, missing, edited? }],
- *       // edited: 手で直した記録なら true
+ *   history: [{ date: "YYYY-MM-DD", total, gain, byBroker: { 名前: 円 }, missing, edited?, memo? }],
+ *       // edited: 手で直した記録なら true / memo: その日のコメント(買った銘柄・相場のできごとなど。最大 200 文字)
+ *       // 同じ日に価格を更新し直しても、コメントは引き継ぐ
  *   historyTrash: [{ id, reason, at, entry }],
  *       // 削除・修正前の履歴(新しい順・最大 200 件)。reason:deleted(削除)/ edited(修正前)/ replaced(置き換え前)
  *       // entry は history の 1 件と同じ形。「元に戻す」で history に戻せる
@@ -76,6 +77,8 @@
   const MEMO_MAX = 1000;
   const HISTORY_MAX = 2000;
   const TRASH_MAX = 200;
+  const HISTORY_MEMO_MAX = 200;
+  const AUTO_MIN_MINUTES = 30; // 開いたときの自動更新は、前回の更新からこれだけたっていたら
   const TRASH_REASONS = [
     { id: 'deleted', label: '削除' },
     { id: 'edited', label: '修正前' },
@@ -179,7 +182,14 @@
     }
     const out = { date: e.date, total: yenInt(e.total) || 0, gain: yenInt(e.gain), byBroker, missing: Number.isInteger(e.missing) && e.missing > 0 ? e.missing : 0 };
     if (e.edited === true) out.edited = true;
+    const memo = historyMemo(e.memo);
+    if (memo) out.memo = memo;
     return out;
+  }
+
+  /** 履歴のコメント:前後の空白を取り、最大 200 文字(改行は残す) */
+  function historyMemo(v) {
+    return typeof v === 'string' ? v.trim().slice(0, HISTORY_MEMO_MAX) : '';
   }
 
   function cleanTrash(t) {
@@ -365,12 +375,18 @@
 
   // ---- 履歴 ----
 
-  /** その日の総資産と証券会社別の合計を保存(同じ日は上書き) */
-  function saveHistory(a, date) {
+  /**
+   * その日の総資産と証券会社別の合計を保存(同じ日は上書き)。
+   * その日のコメントは引き継ぐ。手で直した記録を上書きするときは、直した記録を「置き換え前」として残す
+   */
+  function saveHistory(a, date, now = new Date()) {
     const s = summary(a);
     const byBroker = {};
     for (const [k, g] of s.byBroker) byBroker[k] = g.value;
     const entry = { date, total: s.total, gain: s.gain, byBroker, missing: s.missing };
+    const prev = a.history.find((e) => e.date === date);
+    if (prev && prev.memo) entry.memo = prev.memo;
+    if (prev && prev.edited) toTrash(a, prev, 'replaced', now);
     a.history = a.history.filter((e) => e.date !== date).concat(entry).sort((x, y) => (x.date < y.date ? -1 : 1)).slice(-HISTORY_MAX);
     return entry;
   }
@@ -412,6 +428,29 @@
     a.history[i] = { ...old, date: nextDate, total, edited: true };
     a.history.sort(byDate);
     return { ok: true, changed: true, date: nextDate };
+  }
+
+  /** 履歴 1 件のコメントを書く(空なら消す)。その日の記録が無ければ false */
+  function setHistoryMemo(a, date, memo) {
+    const e = a.history.find((x) => x.date === date);
+    if (!e) return false;
+    const m = historyMemo(memo);
+    if (m) e.memo = m;
+    else delete e.memo;
+    return true;
+  }
+
+  /**
+   * 開いたときに価格を自動で更新するか。
+   * 取りに行ける銘柄があり(国内株・投信は価格取得の URL、米国株は Finnhub のキー)、
+   * 前回の更新から AUTO_MIN_MINUTES 分以上たっている(または一度も更新していない)とき
+   */
+  function autoUpdateDue(a, { secrets = {}, now = new Date(), minMinutes = AUTO_MIN_MINUTES } = {}) {
+    const fetchable = a.holdings.some((h) => (h.type === 'us' ? !!secrets.finnhubKey : !!secrets.priceUrl));
+    if (!fetchable) return false;
+    const last = a.lastUpdateAt ? Date.parse(a.lastUpdateAt) : NaN;
+    if (Number.isNaN(last)) return true;
+    return now.getTime() - last >= minMinutes * 60000;
   }
 
   /** 履歴を削除する(「削除・修正前の履歴」へ移す)。消した件数を返す */
@@ -654,7 +693,7 @@
     }
     if (report.fx) a.fx = { rate: report.fx.rate, source: report.fx.source, at };
     a.lastUpdateAt = at;
-    return saveHistory(a, U.todayStr(now));
+    return saveHistory(a, U.todayStr(now), now);
   }
 
   /** 価格を手入力する(米国株はドル) */
@@ -801,6 +840,12 @@
       d.schemaVersion = 10;
       return d;
     });
+    // v10 → v11:総資産の履歴に、その日のコメント(memo)を書けるようにした(足すものは無い。
+    // 古い版のアプリがコメントを消してしまわないよう、版だけ上げる)
+    MT.store.addMigration(10, (d) => {
+      d.schemaVersion = 11;
+      return d;
+    });
   }
 
   MT.assetsModel = {
@@ -839,8 +884,12 @@
     restoreHistory,
     purgeTrash,
     historyFlags,
+    setHistoryMemo,
+    autoUpdateDue,
     TRASH_REASONS,
     TRASH_MAX,
+    HISTORY_MEMO_MAX,
+    AUTO_MIN_MINUTES,
     saveHolding,
     saveManual,
     removeHolding,

@@ -182,6 +182,8 @@
     }
     // 月末の入力の確認(前月の月末記録が未入力・未確認、バックアップが 30 日以上前のとき。1 日 1 回)
     if (MT.monthEnd) MT.monthEnd.maybePrompt();
+    // 資産の価格:開いたとき・戻ってきたときに自動で更新(前回から 30 分以上たっていたら。設定で止められる)
+    if (MT.assetsAuto && res.status !== 'newer') MT.assetsAuto.start();
 
     if (res.status === 'corrupt') {
       toast('保存データが壊れていたため、空の状態で始めました(元のデータは別名で残しています)', { type: 'error', duration: 6000 });

@@ -74,30 +74,57 @@
 
   let updating = false;
 
-  async function updatePrices() {
+  const onAssetsScreen = () => /^#\/assets(\/|$)/.test(root.location.hash || '');
+
+  /** 画面の入力欄で入力中なら、終わるまで待つ(自動更新の結果で書き直して、入力が消えないように) */
+  function whenIdle() {
+    return new Promise((resolve) => {
+      const check = () => {
+        const el = root.document.activeElement;
+        const view = root.document.getElementById('view');
+        const typing = el && view && view.contains(el) && el.matches('input, textarea, select, [contenteditable="true"]');
+        if (!typing) return resolve();
+        root.document.addEventListener('focusout', () => setTimeout(check, 400), { once: true });
+      };
+      check();
+    });
+  }
+
+  /**
+   * 価格を更新する。auto:開いたときの自動更新(結果は短いお知らせだけ。ダイアログは出さない。
+   * 1 件も取れなかったときは、履歴を作らずに終える)
+   */
+  async function updatePrices({ auto = false } = {}) {
     if (updating) return;
     const a = store.get().assets;
     if (!a.holdings.length && !a.manual.length) {
-      toast('資産がまだありません');
+      if (!auto) toast('資産がまだありません');
       return;
     }
     updating = true;
-    MT.app.rerender();
+    if (!auto || onAssetsScreen()) MT.app.rerender();
     try {
       const report = await MT.assetPrices.fetchPrices({ assets: a, secrets: MT.secrets.get() });
       if (report.aborted) {
-        F.openPriceReport(report);
+        if (auto) toast(`価格の自動更新:${report.aborted}`, { type: 'error', duration: 5000 });
+        else F.openPriceReport(report);
         return;
       }
-      store.update((d) => A.applyPriceReport(d.assets, report, new Date()));
       const c = MT.assetPrices.countReport(report);
-      if (c.failed.length || report.messages.length) F.openPriceReport(report);
+      if (auto && !c.ok) {
+        toast('価格を自動で取れませんでした(通信できない可能性があります)。資産の「価格を更新」で詳しく見られます', { type: 'error', duration: 5000 });
+        return;
+      }
+      if (auto) await whenIdle();
+      store.update((d) => A.applyPriceReport(d.assets, report, new Date()));
+      if (auto) toast(c.failed.length ? `価格を自動で更新しました(${c.ok}件。取れなかったもの ${c.failed.length}件)` : `価格を自動で更新しました(${c.ok}件)`, { duration: 3200 });
+      else if (c.failed.length || report.messages.length) F.openPriceReport(report);
       else toast(`価格を更新しました(${c.ok}件)`);
     } catch (e) {
-      toast('価格を更新できませんでした', { type: 'error' });
+      toast(auto ? '価格を自動で更新できませんでした' : '価格を更新できませんでした', { type: 'error' });
     } finally {
       updating = false;
-      MT.app.rerender();
+      if (!auto || onAssetsScreen()) MT.app.rerender();
     }
   }
 
@@ -186,11 +213,13 @@
       )
     );
     if (a.history.length) CH.history('assets-history', histCanvas, histFallback, a.history);
+    if (a.history.slice(-120).some((e) => e.memo)) histCanvas.closest('.chart-card').append(h('p', { class: 'hint', text: '◆ はコメントのある日です(点を押すと出ます)。コメントは「履歴を直す」で書けます。' }));
   }
 
   function priceStatusText(a) {
     const sec = MT.secrets.get();
     const parts = [];
+    if (MT.assetsAuto && MT.assetsAuto.enabled() && A.autoUpdateDue(a, { secrets: sec, minMinutes: 0 })) parts.push(`開いたときに自動で更新(前回から${A.AUTO_MIN_MINUTES}分以上たっていたら)`);
     if (!sec.priceUrl) parts.push('国内株・投資信託の価格取得URLが未設定');
     if (a.holdings.some((x) => x.type === 'us') && !sec.finnhubKey) parts.push('Finnhub のキーが未設定(米国株は手入力)');
     if (a.fx.rate) parts.push(`USD/JPY ${a.fx.rate}(${a.fx.source === 'auto' ? '自動' : '手入力'})`);

@@ -1,6 +1,8 @@
 /*
  * 資産管理:総資産の履歴を直す画面
- *   #/assets/history   履歴の一覧(直す・削除)と、削除・修正前の履歴(元に戻す・完全に消す)
+ *   #/assets/history   履歴の一覧(コメント・直す・削除)と、削除・修正前の履歴(元に戻す・完全に消す)
+ *
+ * コメント:その日に買った銘柄や、相場の大きなできごとなどを 1 日ごとに書ける(グラフでは ◆ の点)。
  *
  * 削除や修正をしても、前の記録は「削除・修正前の履歴」に残る(最大 200 件)。そこから元に戻せる。
  * 確かめたほうがよい記録(前後と比べて急な変化・価格未取得が多い・0 円)には目印を付ける。
@@ -13,7 +15,7 @@
   const store = MT.store;
   const CH = MT.assetsCharts;
   const { h, icon, btn, openSheet, actionSheet, confirmDialog, toast, amountField } = MT.ui;
-  const { segmented, dateInput, field, formFoot, errorLine } = MT.forms;
+  const { segmented, dateInput, field, formFoot, errorLine, memoArea } = MT.forms;
 
   const SLOT = 'assets-history-edit';
   const PAGE = 60; // 一覧に一度に出す件数
@@ -29,7 +31,7 @@
     return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
 
-  let filter = 'all'; // all / flagged
+  let filter = 'all'; // all / flagged / memo
   let limit = PAGE;
 
   const assets = () => store.get().assets;
@@ -72,7 +74,10 @@
       { class: 'card chart-card' },
       h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: '推移' })),
       h('div', { class: 'chart-box' }, canvas, fallback),
-      h('p', { class: 'hint', text: `点を押すと、その日の記録を直せます。${flags.size ? '赤い点は、確かめたほうがよい記録です。' : ''}${a.history.length > 120 ? '(グラフは直近 120 件)' : ''}` })
+      h('p', {
+        class: 'hint',
+        text: `点を押すと、その日のコメントを書いたり、記録を直したりできます。${a.history.some((e) => e.memo) ? '◆ はコメントのある日です。' : ''}${flags.size ? '赤い点は、確かめたほうがよい記録です。' : ''}${a.history.length > 120 ? '(グラフは直近 120 件)' : ''}`,
+      })
     );
     CH.history(SLOT, canvas, fallback, a.history, { marks: new Set(flags.keys()), onPick: (date) => rowMenu(date) });
     return card;
@@ -86,12 +91,16 @@
       card.append(h('p', { class: 'card-text hint', text: 'まだ記録がありません。資産の「価格を更新」を押すと、その日の総資産を記録します。' }));
       return card;
     }
-    if (flags.size) {
+    const memoCount = a.history.filter((e) => e.memo).length;
+    if (filter === 'flagged' && !flags.size) filter = 'all';
+    if (filter === 'memo' && !memoCount) filter = 'all';
+    if (flags.size || memoCount) {
       const seg = segmented(
         [
           { value: 'all', label: 'すべて' },
-          { value: 'flagged', label: `要確認(${flags.size})` },
-        ],
+          memoCount ? { value: 'memo', label: `コメント(${memoCount})` } : null,
+          flags.size ? { value: 'flagged', label: `要確認(${flags.size})` } : null,
+        ].filter(Boolean),
         filter,
         {
           label: '表示する記録',
@@ -103,8 +112,6 @@
         }
       );
       card.append(h('div', { class: 'card-text hist-filter' }, seg.el));
-    } else {
-      filter = 'all';
     }
 
     // 新しい順。増減は、ひとつ前(古い側)の記録との差
@@ -112,6 +119,7 @@
     for (let i = a.history.length - 1; i >= 0; i--) {
       const e = a.history[i];
       if (filter === 'flagged' && !flags.has(e.date)) continue;
+      if (filter === 'memo' && !e.memo) continue;
       rows.push({ e, prev: a.history[i - 1] || null, flags: flags.get(e.date) || [] });
     }
     const shown = rows.slice(0, limit);
@@ -143,9 +151,14 @@
       { class: `pay-row no-check${flags.length ? ' is-flagged' : ''}` },
       h(
         'button',
-        { type: 'button', class: 'pay-main', 'aria-label': `${fullDate(e.date)} 総資産 ${yen(e.total)}${flags.length ? '(要確認)' : ''}`, onClick: () => rowMenu(e.date) },
+        {
+          type: 'button',
+          class: 'pay-main',
+          'aria-label': `${fullDate(e.date)} 総資産 ${yen(e.total)}${flags.length ? '(要確認)' : ''}${e.memo ? ` コメント:${e.memo}` : ''}`,
+          onClick: () => rowMenu(e.date),
+        },
         h('span', { class: 'pay-name', text: fullDate(e.date) }),
-        chips.length ? h('span', { class: 'pay-meta' }, chips) : null,
+        chips.length || e.memo ? h('span', { class: 'pay-meta' }, chips, e.memo ? memoLine(e.memo) : null) : null,
         h('span', { class: 'pay-amount' }, yen(e.total), diff === null ? null : h('small', { class: tone(diff), text: signed(diff) }))
       )
     );
@@ -177,7 +190,8 @@
                 'span',
                 { class: 'pay-meta' },
                 h('span', { class: 'chip', text: A.label(A.TRASH_REASONS, t.reason) }),
-                t.at ? h('span', { text: dateTime(t.at) }) : null
+                t.at ? h('span', { text: dateTime(t.at) }) : null,
+                t.entry.memo ? memoLine(t.entry.memo) : null
               ),
               h('span', { class: 'pay-amount', text: yen(t.entry.total) })
             )
@@ -185,6 +199,11 @@
         )
       )
     );
+  }
+
+  /** 一覧の中のコメント(◆ と本文。長いものは 2 行まで) */
+  function memoLine(memo) {
+    return h('span', { class: 'hist-memo' }, h('span', { class: 'hist-memo-mark', 'aria-hidden': 'true', text: '◆' }), h('span', { class: 'hist-memo-text', text: memo }));
   }
 
   // ---------------------------------------------------------------
@@ -199,10 +218,37 @@
       title: `${fullDate(date)} の記録`,
       description: [`総資産 ${yen(e.total)}`, ...flags.map((f) => f.text)].join('・'),
       actions: [
+        { label: e.memo ? 'コメントを直す' : 'コメントを書く', onSelect: () => openMemoSheet(date) },
         { label: '直す(日付・総資産)', onSelect: () => openEditSheet(date) },
         { label: 'この記録を削除', danger: true, onSelect: () => removeEntry(date) },
       ],
     });
+  }
+
+  /** その日のコメント(買った銘柄・相場のできごとなど) */
+  function openMemoSheet(date) {
+    const e = findEntry(date);
+    if (!e) return;
+    const s = openSheet({ title: 'コメント', description: `${fullDate(date)}・総資産 ${yen(e.total)}`, className: 'sheet-form' });
+    const ta = memoArea(e.memo || '', A.HISTORY_MEMO_MAX);
+    ta.rows = 4;
+    ta.setAttribute('aria-label', 'その日のコメント');
+    ta.placeholder = '例:銘柄Xを100株買った / 相場が全体に大きく下がった';
+    const count = h('p', { class: 'form-hint hist-memo-count', 'aria-live': 'polite' });
+    const showCount = () => {
+      count.textContent = `${[...ta.value].length} / ${A.HISTORY_MEMO_MAX} 文字`;
+    };
+    ta.addEventListener('input', showCount);
+    showCount();
+    s.body.append(field('コメント', ta, 'グラフでは ◆ の点になり、点を押すとコメントが出ます。同じ日に価格を更新し直しても消えません。'), count);
+    const save = (text) => {
+      if (store.update((d) => A.setHistoryMemo(d.assets, date, text))) {
+        s.close();
+        toast(text.trim() ? 'コメントを保存しました' : 'コメントを消しました');
+      }
+    };
+    formFoot(s, { onSave: () => save(ta.value), onDelete: e.memo ? () => save('') : null });
+    ta.focus();
   }
 
   function removeEntry(date) {
@@ -300,5 +346,5 @@
 
   MT.views = MT.views || {};
   MT.views['assets/history'] = { render, tab: 'assets', unmount: () => CH.destroy(SLOT) };
-  MT.assetsHistoryUI = { rowMenu, openEditSheet };
+  MT.assetsHistoryUI = { rowMenu, openEditSheet, openMemoSheet };
 })(window);
