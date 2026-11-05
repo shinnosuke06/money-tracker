@@ -54,7 +54,16 @@
   }
 
   function toggle(key, id) {
+    if (key === 'incomes') return toggleIncome(id);
     store.update((d) => P.toggleDone(d.payments, key, id));
+  }
+
+  /** 入金のチェック:優先振込先の現在残高にも足す・外したら引き戻す(何をしたかを短く出す) */
+  function toggleIncome(id) {
+    let r = null;
+    if (!store.update((d) => (r = P.toggleIncome(d.payments, id, U.todayStr()))) || !r) return;
+    const msg = P.creditMessage(store.get(), r);
+    if (msg) toast(msg, { duration: 4200 });
   }
 
   function checkBtn(checked, label, onToggle) {
@@ -575,6 +584,7 @@
           )
         ),
         h('div', { class: 'stat-grid card-text' }, stat('合計', total), stat('未済(これから入る)', pending, pending > 0 ? 'tone-pos' : '')),
+        h('p', { class: 'card-text hint', text: 'チェック(入金済)を入れると、優先振込先の口座の現在残高に入金額を足します。外すと引き戻します。足したあとに口座の現在残高を手で直したときは、手で入れた額をそのまま使います(二重には足しません)。' }),
         list
       ),
       sidejobNextCard(d, { compact: false }),
@@ -647,6 +657,7 @@
 
   function incomeRow(d, i) {
     const auto = MT.sidejobModel ? MT.sidejobModel.clientsForIncome(d.sidejob, i.id) : [];
+    const cr = i.done && i.credited ? i.credited : null;
     return h(
       'li',
       { class: `pay-row${i.done ? ' is-done' : ''}${i.amount === null && !i.done ? ' is-unentered' : ''}` },
@@ -660,7 +671,8 @@
           { class: 'pay-meta' },
           h('span', { class: 'chip', text: i.fixed ? '毎月固定' : '変動' }),
           auto.length ? h('span', { class: 'chip chip-soft', text: `副業(${auto.map((c) => c.name).join('・')})から自動` }) : null,
-          h('span', { text: i.targetId ? `優先:${P.accountName(d, i.targetId)}` : '振込先の指定なし' })
+          h('span', { text: i.targetId ? `優先:${P.accountName(d, i.targetId)}` : '振込先の指定なし' }),
+          cr ? h('span', { class: 'chip chip-in', text: cr.settled ? `${P.accountName(d, cr.accountId)}に足し済み(残高は手で確定)` : `${P.accountName(d, cr.accountId)}の残高に足し済み` }) : null
         ),
         h('span', { class: `pay-amount${i.amount === null ? ' is-missing' : i.amount > 0 ? ' is-in' : ''}`, text: i.amount === null ? '未入力' : plusYen(i.amount) })
       )

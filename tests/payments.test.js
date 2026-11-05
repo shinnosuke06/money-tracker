@@ -384,3 +384,102 @@ test('引き落とし後の残りの状態:マイナスは不足、引き落と�
   for (const r of rows) assert.equal(r.status, P.afterStatus(r.after, r.withdraw));
   assert.equal(rows.find((r) => r.itemId === a).status, 'tight');
 });
+
+// ---- 入金済にしたら、優先振込先の現在残高に足す(架空の金額) ----
+
+const bal = (p, id) => p.accounts.find((x) => x.itemId === id).balance;
+
+test('入金済にすると優先振込先の現在残高に足し、外すと引き戻す。確保している資金は変わらない', () => {
+  const { d, p, a } = fixture();
+  P.saveIncome(p, { id: 'sal', name: '給与', amount: 200000, fixed: true, targetId: a });
+  const secured = P.cashflow(p, YM).secured;
+  const r = P.toggleIncome(p, 'sal', '2026-11-25');
+  assert.equal(r.done, true);
+  assert.deepEqual(r.added, { accountId: a, amount: 200000, before: 50000, after: 250000 });
+  assert.equal(bal(p, a), 250000);
+  assert.equal(p.accounts.find((x) => x.itemId === a).balanceDate, '2026-11-25');
+  assert.deepEqual(p.incomes[0].credited, { accountId: a, amount: 200000, settled: false });
+  assert.equal(P.cashflow(p, YM).secured, secured); // 入金予定から口座へ移っただけ
+  assert.match(P.creditMessage(d, r), /架空銀行A」の現在残高に 200,000円を足しました\(50,000円 → 250,000円\)/);
+  const back = P.toggleIncome(p, 'sal', '2026-11-25');
+  assert.equal(back.done, false);
+  assert.equal(back.removed.amount, 200000);
+  assert.equal(bal(p, a), 50000);
+  assert.equal('credited' in p.incomes[0], false);
+});
+
+test('入金済のあと口座の現在残高を手で直したら、外しても引き戻さない(手で入れた額を使う)', () => {
+  const { d, p, a } = fixture();
+  P.saveIncome(p, { id: 'sal', name: '給与', amount: 200000, fixed: true, targetId: a });
+  P.toggleIncome(p, 'sal', '2026-11-25');
+  P.setBalance(p, a, 248000, '2026-11-26'); // 通帳を見て直した
+  assert.equal(p.incomes[0].credited.settled, true);
+  const r = P.toggleIncome(p, 'sal', '2026-11-27');
+  assert.equal(r.removed, null);
+  assert.equal(r.kept.accountId, a);
+  assert.equal(bal(p, a), 248000);
+  assert.match(P.creditMessage(d, r), /手で直されているため、そのままにしました/);
+  // もう一度入金済にすると、手で直した残高に足す(入金予定に戻っていた額を、また口座へ)
+  P.toggleIncome(p, 'sal', '2026-11-27');
+  assert.equal(bal(p, a), 448000);
+});
+
+test('同じ口座に 2 件足して 1 件外すと、その分だけ引き戻す', () => {
+  const { p, a } = fixture();
+  P.saveIncome(p, { id: 'i1', name: '入金1', amount: 30000, targetId: a });
+  P.saveIncome(p, { id: 'i2', name: '入金2', amount: 20000, targetId: a });
+  P.toggleIncome(p, 'i1', '2026-11-20');
+  P.toggleIncome(p, 'i2', '2026-11-21');
+  assert.equal(bal(p, a), 100000);
+  P.toggleIncome(p, 'i1', '2026-11-22');
+  assert.equal(bal(p, a), 70000);
+});
+
+test('優先振込先が無い・金額が未入力なら、入金済にしても残高は変えない', () => {
+  const { d, p, a, b } = fixture();
+  P.saveIncome(p, { id: 'free', name: '指定なし', amount: 10000, targetId: null });
+  P.saveIncome(p, { id: 'blank', name: '未入力', amount: null, targetId: a });
+  const r1 = P.toggleIncome(p, 'free', '2026-11-20');
+  const r2 = P.toggleIncome(p, 'blank', '2026-11-20');
+  assert.equal(r1.skipped, 'noTarget');
+  assert.equal(r2.skipped, 'noAmount');
+  assert.deepEqual([bal(p, a), bal(p, b)], [50000, 10000]);
+  assert.match(P.creditMessage(d, r1), /優先振込先が無いため/);
+  assert.equal(P.toggleIncome(p, 'none', '2026-11-20'), null);
+});
+
+test('入金済のまま金額・優先振込先を直すと、足した額も直す。編集の「済」でも足す', () => {
+  const { p, a, b } = fixture();
+  const rep = {};
+  P.saveIncome(p, { id: 'sal', name: '給与', amount: 100000, targetId: a, done: true }, '2026-11-25', rep);
+  assert.equal(rep.added.amount, 100000);
+  assert.equal(bal(p, a), 150000);
+  P.saveIncome(p, { id: 'sal', name: '給与', amount: 120000, targetId: a, done: true }, '2026-11-25');
+  assert.equal(bal(p, a), 170000);
+  P.saveIncome(p, { id: 'sal', name: '給与', amount: 120000, targetId: b, done: true }, '2026-11-25');
+  assert.deepEqual([bal(p, a), bal(p, b)], [50000, 130000]);
+  // 名前だけ直しても、残高は変わらない
+  P.saveIncome(p, { id: 'sal', name: '給料', amount: 120000, targetId: b, done: true }, '2026-11-26');
+  assert.equal(bal(p, b), 130000);
+  // 編集で「済」を外すと引き戻す
+  P.saveIncome(p, { id: 'sal', name: '給料', amount: 120000, targetId: b, done: false }, '2026-11-26');
+  assert.equal(bal(p, b), 10000);
+});
+
+test('月替わりで入金済が外れても、口座の残高は引き戻さない。v12 のデータを開いても入金予定はそのまま', () => {
+  const { d, p, a } = fixture();
+  P.saveIncome(p, { id: 'sal', name: '給与', amount: 200000, fixed: true, targetId: a });
+  P.toggleIncome(p, 'sal', '2026-11-25');
+  P.rollover(d, new Date(2026, 11, 2));
+  assert.equal(p.incomes[0].done, false);
+  assert.equal('credited' in p.incomes[0], false);
+  assert.equal(bal(p, a), 250000);
+
+  const v12 = store.createEmpty(NOW);
+  v12.schemaVersion = 12;
+  v12.payments.incomes = [{ id: 'x', name: '入金', amount: 1000, fixed: true, targetId: null, done: true, memo: '' }];
+  const res = store.prepare(JSON.parse(JSON.stringify(v12)));
+  assert.equal(res.ok, true);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
+  assert.deepEqual(res.data.payments.incomes, v12.payments.incomes);
+});

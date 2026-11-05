@@ -11,7 +11,9 @@
  *       // 支払い・ローン。amount=請求額(null は未入力)、dueDay=引き落とし日(1〜31)
  *       // category: loan / fixed / variable / investment、endMonth を過ぎると非表示
  *   billOrder: "due"|"manual", // 支払いの並び。due=引き落とし日順(自動)、manual=bills の配列の順(並べ替えで決めた順)
- *   incomes: [{ id, name, amount, fixed, targetId, done, memo }],   // 入金予定。targetId=優先振込先。配列の順が表示順
+ *   incomes: [{ id, name, amount, fixed, targetId, done, memo, credited }],   // 入金予定。targetId=優先振込先。配列の順が表示順
+ *       // credited:入金済にしたときに、優先振込先の現在残高へ足した記録 { accountId, amount, settled }(足していなければ無し)
+ *       //   入金済を外すと、足した額を引き戻す。ただし、そのあと口座の現在残高を手で直していたら(settled)そのまま
  *   specials: [{ id, name, amount, month, accountId, done, memo }], // 特別支出(支払月 month)
  *   allocation: { mode: "auto"|"manual", items: [{ incomeId, accountId, amount }] },
  *       // 振り分け。auto のときは毎回計算し直す。手で直すと manual になる
@@ -110,16 +112,25 @@
     };
   }
 
+  function cleanCredit(c) {
+    if (!c || typeof c !== 'object' || typeof c.accountId !== 'string' || !c.accountId || !U.isYenValue(c.amount) || c.amount <= 0) return null;
+    return { accountId: c.accountId, amount: c.amount, settled: c.settled === true };
+  }
+
   function cleanIncome(i) {
-    return {
+    const done = i.done === true;
+    const out = {
       id: cleanId(i.id, 'inc'),
       name: cleanText(i.name) || '入金',
       amount: cleanAmount(i.amount),
       fixed: i.fixed !== false,
       targetId: typeof i.targetId === 'string' && i.targetId ? i.targetId : null,
-      done: i.done === true,
+      done,
       memo: cleanMemo(i.memo),
     };
+    const credited = done ? cleanCredit(i.credited) : null;
+    if (credited) out.credited = credited; // 足した記録があるときだけ持つ
+    return out;
   }
 
   function cleanSpecial(s) {
@@ -543,11 +554,62 @@
     if (a) a.kind = kind === 'cash' ? 'cash' : 'bank';
   }
 
+  /**
+   * 現在残高を手で直す。この口座に入金済で足した額は「手で直したあと」(settled)にする
+   * (あとで入金済を外しても、手で入れた残高から引き戻さない)
+   */
   function setBalance(p, itemId, value, today) {
     const a = findAccount(p, itemId);
     if (!a) return;
     a.balance = cleanAmount(value);
     a.balanceDate = today;
+    for (const i of p.incomes) if (i.credited && i.credited.accountId === itemId) i.credited.settled = true;
+  }
+
+  /**
+   * 入金済にしたら、優先振込先の現在残高に入金額を足す。入金済を外したら、足した額を引き戻す。
+   * 入金済のまま金額や優先振込先を直したら、足した額も直す。
+   * ただし、足したあとに口座の現在残高を手で直していたら(settled)、残高はそのまま(手で入れた額を正とする)。
+   * @param prev 変更前の入金(新しく作るときは null) / next 変更後(cleanIncome 済み。credited をここで決める)
+   * @returns {{added, removed, kept, skipped}} 画面のお知らせ用
+   *   added / removed:{ accountId, amount, before, after } / kept:引き戻さなかった記録 / skipped:'noTarget'|'noAccount'|'noAmount'|'tooLarge'
+   */
+  function creditIncome(p, prev, next, today) {
+    const old = prev && prev.done && prev.credited ? prev.credited : null;
+    const res = { added: null, removed: null, kept: null, skipped: null };
+    delete next.credited;
+    if (next.done && old && (old.settled || (old.accountId === next.targetId && old.amount === next.amount))) {
+      next.credited = { ...old }; // 変わらない(または手で直したあと)
+      return res;
+    }
+    if (old) {
+      const a = findAccount(p, old.accountId);
+      if (old.settled || !a || a.balance === null) res.kept = { ...old };
+      else {
+        const before = a.balance;
+        a.balance = cleanAmount(before - old.amount) ?? before;
+        a.balanceDate = today;
+        res.removed = { accountId: a.itemId, amount: old.amount, before, after: a.balance };
+      }
+    }
+    if (next.done) {
+      const a = next.targetId ? findAccount(p, next.targetId) : null;
+      if (!next.targetId) res.skipped = 'noTarget';
+      else if (!a) res.skipped = 'noAccount';
+      else if (!(next.amount > 0)) res.skipped = 'noAmount';
+      else {
+        const before = a.balance || 0;
+        const after = cleanAmount(before + next.amount);
+        if (after === null) res.skipped = 'tooLarge';
+        else {
+          a.balance = after;
+          a.balanceDate = today;
+          next.credited = { accountId: a.itemId, amount: next.amount, settled: false };
+          res.added = { accountId: a.itemId, amount: next.amount, before: a.balance - next.amount, after };
+        }
+      }
+    }
+    return res;
   }
 
   function upsert(list, item) {
@@ -589,8 +651,38 @@
   function reorderIncomes(p, ids) {
     p.incomes = U.reorderSubset(p.incomes, ids);
   }
-  function saveIncome(p, draft) {
-    return upsert(p.incomes, cleanIncome(draft));
+  /** 入金済の切り替えで、口座の現在残高にしたことの説明(画面のお知らせ用。何もしていなければ '') */
+  function creditMessage(d, r) {
+    if (!r) return '';
+    const yen = (v) => `${U.yen(v)}円`;
+    const name = (id) => accountName(d, id);
+    const parts = [];
+    if (r.removed) parts.push(`「${name(r.removed.accountId)}」の現在残高から ${yen(r.removed.amount)}を引き戻しました(${yen(r.removed.before)} → ${yen(r.removed.after)})`);
+    if (r.kept) parts.push(`「${name(r.kept.accountId)}」の現在残高は手で直されているため、そのままにしました`);
+    if (r.added) parts.push(`「${name(r.added.accountId)}」の現在残高に ${yen(r.added.amount)}を足しました(${yen(r.added.before)} → ${yen(r.added.after)})`);
+    const skip = { noTarget: '優先振込先が無いため、口座の残高は変えていません', noAccount: '優先振込先の口座が見つからないため、残高は変えていません', noAmount: '金額が未入力のため、口座の残高は変えていません', tooLarge: '金額が大きすぎるため、口座の残高は変えていません' };
+    if (r.skipped) parts.push(skip[r.skipped]);
+    return parts.join('。');
+  }
+
+  /** 入金予定を保存する(入金済の切り替え・金額の変更は、優先振込先の現在残高にも反映。report に結果を入れる) */
+  function saveIncome(p, draft, today = U.todayStr(), report = null) {
+    const next = cleanIncome(draft);
+    const prev = p.incomes.find((x) => x.id === next.id) || null;
+    const res = creditIncome(p, prev, next, today);
+    if (report) Object.assign(report, res);
+    return upsert(p.incomes, next);
+  }
+
+  /** 入金のチェック(入金済にする・外す)。優先振込先の現在残高にも反映する */
+  function toggleIncome(p, id, today = U.todayStr()) {
+    const prev = p.incomes.find((x) => x.id === id);
+    if (!prev) return null;
+    const next = { ...prev, done: !prev.done };
+    const res = creditIncome(p, prev, next, today);
+    delete prev.credited;
+    Object.assign(prev, next);
+    return { done: prev.done, ...res };
   }
   function saveSpecial(p, draft) {
     return upsert(p.specials, cleanSpecial(draft));
@@ -680,6 +772,7 @@
     }
     for (const i of p.incomes) {
       i.done = false;
+      delete i.credited; // 先月に足した額は口座に入ったまま(残高は変えない)
       if (!i.fixed) i.amount = null;
     }
     p.allocation = { mode: 'auto', items: [] };
@@ -727,6 +820,12 @@
     MT.store.addMigration(6, (d) => {
       if (d.payments && typeof d.payments === 'object') d.payments.billOrder = 'due';
       d.schemaVersion = 7;
+      return d;
+    });
+    // v12 → v13:入金済にしたとき、優先振込先の現在残高へ足した記録(incomes[].credited)を持てるようにした。
+    // 足すものは無い(古い版のアプリが記録を消さないよう、版だけ上げる)
+    MT.store.addMigration(12, (d) => {
+      d.schemaVersion = 13;
       return d;
     });
   }
@@ -786,6 +885,8 @@
     saveSpecial,
     removeById,
     toggleDone,
+    toggleIncome,
+    creditMessage,
     setAllocation,
     resetAllocation,
     reflectPreview,
