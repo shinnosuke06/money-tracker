@@ -15,6 +15,7 @@
   const store = MT.store;
   const F = MT.assetsUI;
   const CH = MT.assetsCharts;
+  const EV = MT.assetEvents;
   const { h, add, icon, btn, toast } = MT.ui;
 
   const SUBNAV = [
@@ -104,7 +105,13 @@
     updating = true;
     if (!auto || onAssetsScreen()) MT.app.rerender();
     try {
-      const report = await MT.assetPrices.fetchPrices({ assets: a, secrets: MT.secrets.get() });
+      const sec = MT.secrets.get();
+      // 株式分割・配当の確認(1 日 1 回ほど)も一緒に。分割は価格と同じ書き換えの中で反映する(総資産がずれないように)
+      const wantEvents = EV.eventsDue(a, { secrets: sec, now: new Date() });
+      const [report, evReport] = await Promise.all([
+        MT.assetPrices.fetchPrices({ assets: a, secrets: sec }),
+        wantEvents ? MT.assetPrices.fetchEvents({ assets: a, secrets: sec }).catch(() => ({ events: {}, errors: {}, unsupported: false, error: '通信できませんでした' })) : null,
+      ]);
       if (report.aborted) {
         if (auto) toast(`価格の自動更新:${report.aborted}`, { type: 'error', duration: 5000 });
         else F.openPriceReport(report);
@@ -116,7 +123,16 @@
         return;
       }
       if (auto) await whenIdle();
-      store.update((d) => A.applyPriceReport(d.assets, report, new Date()));
+      let created = [];
+      store.update((d) => {
+        const now = new Date();
+        if (evReport) {
+          if (evReport.unsupported || evReport.error) EV.markCheckFailed(d.assets, evReport, now);
+          else created = EV.applyEvents(d.assets, evReport, now);
+        }
+        A.applyPriceReport(d.assets, report, now);
+      });
+      if (created.length) toast(`株の変更のお知らせが ${created.length}件あります(資産のいちばん上)`, { duration: 5000 });
       if (auto) toast(c.failed.length ? `価格を自動で更新しました(${c.ok}件。取れなかったもの ${c.failed.length}件)` : `価格を自動で更新しました(${c.ok}件)`, { duration: 3200 });
       else if (c.failed.length || report.messages.length) F.openPriceReport(report);
       else toast(`価格を更新しました(${c.ok}件)`);
@@ -125,6 +141,35 @@
     } finally {
       updating = false;
       if (!auto || onAssetsScreen()) MT.app.rerender();
+    }
+  }
+
+  /** 株式分割・配当だけを今すぐ確認する(株の変更のお知らせの画面から) */
+  async function checkEvents() {
+    if (updating) return;
+    const a = store.get().assets;
+    const sec = MT.secrets.get();
+    if (!EV.eventsDue(a, { secrets: sec, force: true })) {
+      toast(sec.priceUrl ? '確認できる株(国内株・米国株でコードのあるもの)がありません' : '価格取得のURLが未設定です(設定の「価格の自動取得」)');
+      return;
+    }
+    updating = true;
+    MT.app.rerender();
+    try {
+      const ev = await MT.assetPrices.fetchEvents({ assets: a, secrets: sec });
+      let created = [];
+      store.update((d) => {
+        if (ev.unsupported || ev.error) EV.markCheckFailed(d.assets, ev, new Date());
+        else created = EV.applyEvents(d.assets, ev, new Date());
+      });
+      if (ev.unsupported) toast('価格取得のURLが、分割・配当の確認に対応していません(GAS への追加が必要です)', { type: 'error', duration: 5000 });
+      else if (ev.error) toast(`確認できませんでした:${ev.error}`, { type: 'error' });
+      else toast(created.length ? `株の変更が ${created.length}件見つかりました` : '新しい分割・配当の変更はありませんでした');
+    } catch (e) {
+      toast('確認できませんでした', { type: 'error' });
+    } finally {
+      updating = false;
+      MT.app.rerender();
     }
   }
 
@@ -161,6 +206,9 @@
       );
       return;
     }
+
+    const att = EV.attention(a);
+    if (att.length) container.append(changesNotice(att));
 
     const prev = A.previousEntry(a, U.todayStr());
     const diff = prev ? s.total - prev.total : null;
@@ -214,6 +262,34 @@
     );
     if (a.history.length) CH.history('assets-history', histCanvas, histFallback, a.history);
     if (a.history.slice(-120).some((e) => e.memo)) histCanvas.closest('.chart-card').append(h('p', { class: 'hint', text: '◆ はコメントのある日です(点を押すと出ます)。コメントは「履歴を直す」で書けます。' }));
+  }
+
+  /** 株の変更のお知らせ 1 件の短い説明 */
+  function changeLine(c) {
+    if (c.kind === 'split') {
+      const what = c.ratio < 1 ? '株式併合' : '株式分割';
+      return c.status === 'pending' ? `${c.name}:${what}(${EV.ratioText(c.ratio)})がありました。反映するか確認してください` : `${c.name}:${what}(${EV.ratioText(c.ratio)})を反映しました`;
+    }
+    const p = c.proposal || {};
+    const x = store.get().assets.holdings.find((v) => v.id === c.holdingId);
+    const u = x && x.type === 'us' ? 'ドル' : '円';
+    return p.reason === 'changed' ? `${c.name}:配当が変わったようです(1株 ${U.formatNumber(c.before && c.before.perShare, 4)}${u} → ${U.formatNumber(p.perShare, 4)}${u})` : `${c.name}:配当の情報を見つけました(1株 ${U.formatNumber(p.perShare, 4)}${u})`;
+  }
+
+  function changesNotice(att) {
+    return h(
+      'section',
+      { class: 'notice notice-warn notice-changes', role: 'status' },
+      icon('alert', 'notice-icon'),
+      h(
+        'div',
+        { class: 'notice-main' },
+        h('p', { class: 'notice-title', text: `株の変更のお知らせ(${att.length}件)` }),
+        h('ul', { class: 'notice-list' }, att.slice(0, 3).map((c) => h('li', { text: changeLine(c) }))),
+        att.length > 3 ? h('p', { class: 'notice-text', text: `ほか ${att.length - 3}件` }) : null,
+        h('div', { class: 'notice-actions' }, h('a', { class: 'btn btn-primary btn-small', href: '#/assets/changes' }, h('span', { text: '確認する' })))
+      )
+    );
   }
 
   function priceStatusText(a) {
@@ -319,6 +395,7 @@
         )
       )
     );
+    const attBy = EV.attentionByHolding(a);
     const groups = new Map();
     for (const x of a.holdings) {
       if (!groups.has(x.broker)) groups.set(x.broker, []);
@@ -331,7 +408,7 @@
           'section',
           { class: 'card card-flush' },
           h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: broker }), h('span', { class: `group-sum${tone(g.gain)}`, text: `${yen(g.value)}・${signed(g.gain)}` })),
-          h('ul', { class: 'pay-list asset-list' }, items.map((x) => holdingRow(a, x)))
+          h('ul', { class: 'pay-list asset-list' }, items.map((x) => holdingRow(a, x, attBy.get(x.id) || [])))
         )
       );
     }
@@ -357,9 +434,18 @@
     return 'まだ「価格を更新」していません';
   }
 
-  function holdingRow(a, x) {
+  /** 銘柄の行に出す、株の変更の印(確認するまで色を付ける) */
+  function changeChips(list) {
+    return list.map((c) => {
+      if (c.kind === 'split') return h('span', { class: `chip ${c.status === 'pending' ? 'chip-warn' : 'chip-change'}`, text: c.status === 'pending' ? `${c.ratio < 1 ? '併合' : '分割'}の確認` : `${c.ratio < 1 ? '併合' : '分割'}を反映 ${EV.ratioText(c.ratio)}` });
+      return h('span', { class: 'chip chip-warn', text: c.proposal && c.proposal.reason === 'changed' ? '配当が変わった?' : '配当の提案' });
+    });
+  }
+
+  function holdingRow(a, x, att = []) {
     const v = A.valuation(x, a);
     const unit = F.qtyInfo(x.type).unit;
+    const splitDone = att.find((c) => c.kind === 'split' && c.status === 'applied');
     const priceText = v.missing
       ? '価格未取得'
       : x.type === 'us'
@@ -367,7 +453,7 @@
         : `${U.formatNumber(v.unit, 2)}円`;
     return h(
       'li',
-      { class: 'pay-row no-check' },
+      { class: `pay-row no-check${att.length ? ' is-changed' : ''}` },
       h(
         'button',
         { type: 'button', class: 'pay-main', onClick: () => F.holdingMenu(x.id) },
@@ -375,9 +461,12 @@
         h(
           'span',
           { class: 'pay-meta' },
+          ...changeChips(att),
           h('span', { class: 'chip', text: A.label(A.ACCOUNTS, x.account) }),
           h('span', { class: 'chip', text: A.label(A.TYPES, x.type) }),
-          h('span', { text: `${U.formatNumber(x.quantity, 6)}${unit} × ${priceText}` }),
+          splitDone
+            ? h('span', {}, h('s', { class: 'was', text: `${U.formatNumber(splitDone.before.quantity, 6)}` }), ' → ', h('mark', { class: 'is-new', text: `${U.formatNumber(x.quantity, 6)}${unit}` }), ` × ${priceText}`)
+            : h('span', { text: `${U.formatNumber(x.quantity, 6)}${unit} × ${priceText}` }),
           x.lastError && !v.missing ? h('span', { class: 'meta-due is-warn', text: `取得失敗:${x.lastError}(前回 ${dateTime(x.priceAt)} の価格)` }) : null,
           v.missing ? h('span', { class: 'meta-due is-warn', text: `取れない理由:${missingReason(a, x)}` }) : null,
           x.priceSource === 'manual' && !v.missing ? h('span', { text: '手入力の価格' }) : null,
@@ -538,6 +627,7 @@
   // ---------------------------------------------------------------
 
   function renderDividends(container) {
+    const attBy = EV.attentionByHolding(store.get().assets);
     const a = store.get().assets;
     head(container, 'assets/dividends');
     const cal = A.dividendCalendar(a);
@@ -590,18 +680,22 @@
                 const dv = x.dividend;
                 const b = x.benefit;
                 const unit = x.type === 'us' ? 'ドル' : '円';
+                const att = (attBy.get(x.id) || []).filter((c) => c.kind === 'dividend' || c.status === 'applied');
+                const short = EV.benefitShort(x);
                 return h(
                   'li',
-                  { class: 'pay-row no-check' },
+                  { class: `pay-row no-check${att.length || short ? ' is-changed' : ''}` },
                   h(
                     'button',
-                    { type: 'button', class: 'pay-main', onClick: () => F.openDividendSheet(x.id) },
+                    { type: 'button', class: 'pay-main', onClick: () => (att.some((c) => c.kind === 'dividend') ? (root.location.hash = '#/assets/changes') : F.openDividendSheet(x.id)) },
                     h('span', { class: 'pay-name', text: x.name }),
                     h(
                       'span',
                       { class: 'pay-meta' },
+                      ...changeChips(att),
                       h('span', { text: dv.perShare && dv.months.length ? `配当 ${U.formatNumber(dv.perShare, 4)}${unit} × ${dv.months.join('・')}月` : '配当なし' }),
-                      b.content ? h('span', { text: `優待:${b.content}` }) : null
+                      b.content ? h('span', { text: `優待:${b.content}` }) : null,
+                      short ? h('span', { class: 'chip chip-warn', text: `優待の条件(${U.formatNumber(b.minShares, 6)}株以上)に足りません` }) : null
                     ),
                     h('span', { class: 'pay-amount', text: '編集' })
                   )
@@ -623,7 +717,7 @@
 
   function needsAttention() {
     const d = store.get();
-    return !!(d && d.assets && d.assets.holdings.some((x) => x.nisaUnsure));
+    return !!(d && d.assets && (d.assets.holdings.some((x) => x.nisaUnsure) || EV.attention(d.assets).length > 0));
   }
 
   MT.views = MT.views || {};
@@ -632,5 +726,5 @@
   MT.views['assets/manual'] = { render: renderManual, tab: 'assets' };
   MT.views['assets/summary'] = { render: renderSummary, tab: 'assets' };
   MT.views['assets/dividends'] = { render: renderDividends, tab: 'assets' };
-  MT.assetsView = { updatePrices };
+  MT.assetsView = { updatePrices, checkEvents, isUpdating: () => updating };
 })(window);

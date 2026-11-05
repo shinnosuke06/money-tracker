@@ -14,7 +14,8 @@
  *     nisaUnsure,                     // 旧アプリの "NISA"(新旧が不明)なら true
  *     memo,
  *     dividend: { perShare, months: [1..12], memo },        // 1回あたりの1株配当(米国株はドル)、支払月
- *     benefit:  { content, minShares, recordMonths, arriveMonths } // 優待
+ *     benefit:  { content, minShares, recordMonths, arriveMonths }, // 優待
+ *     eventsSince                     // 株式分割・配当の確認:この日より後のものを「新しい」とみなす(最初の確認の日。js/features/assets/events.js)
  *   }],
  *   manual: [{ id, name, category, value, cost, updatedAt, sellPriority, memo }],
  *       // 手入力の資産。含み損益 = value − cost
@@ -24,6 +25,9 @@
  *   historyTrash: [{ id, reason, at, entry }],
  *       // 削除・修正前の履歴(新しい順・最大 200 件)。reason:deleted(削除)/ edited(修正前)/ replaced(置き換え前)
  *       // entry は history の 1 件と同じ形。「元に戻す」で history に戻せる
+ *   changes: [{ id, key, holdingId, name, code, kind, source, status, seen, eventDate, at, ratio, before, after, proposal, note }],
+ *       // 株の変更のお知らせ(株式分割・配当。新しい順・最大 200 件)。中身は js/features/assets/events.js
+ *   eventsCheck: { at, unsupportedAt, error },  // 分割・配当の確認をした日時・価格取得の URL が対応していなかった日時・失敗の理由
  *   fx: { rate, source, at },         // 直近の更新で使った USD/JPY(auto / manual)
  *   lastUpdateAt,
  *   settings: { taxRate, fxManual, fxCode, reflect: { groupBy, map, manualMap } },
@@ -79,6 +83,9 @@
   const TRASH_MAX = 200;
   const HISTORY_MEMO_MAX = 200;
   const AUTO_MIN_MINUTES = 30; // 開いたときの自動更新は、前回の更新からこれだけたっていたら
+  const CHANGES_MAX = 200;
+  const CHANGE_KINDS = ['split', 'dividend'];
+  const CHANGE_STATUS = ['applied', 'pending', 'dismissed', 'undone'];
   const TRASH_REASONS = [
     { id: 'deleted', label: '削除' },
     { id: 'edited', label: '修正前' },
@@ -94,6 +101,8 @@
       manual: [],
       history: [],
       historyTrash: [],
+      changes: [],
+      eventsCheck: { at: null, unsupportedAt: null, error: null },
       fx: { rate: null, source: null, at: null },
       lastUpdateAt: null,
       settings: { taxRate: DEFAULT_TAX, fxManual: null, fxCode: 'USDJPY', reflect: { groupBy: 'broker', map: {}, manualMap: {} } },
@@ -157,6 +166,50 @@
         recordMonths: months(b.recordMonths),
         arriveMonths: months(b.arriveMonths),
       },
+      eventsSince: U.isDateStr(h.eventsSince) ? h.eventsSince : null,
+    };
+  }
+
+  /** 株の変更のお知らせ 1 件(数値は分割・配当の計算に使うものだけ残す) */
+  function cleanChange(c) {
+    const nums = (o) => {
+      if (!o || typeof o !== 'object') return null;
+      const out = {};
+      for (const k of ['quantity', 'avgPrice', 'price', 'priceUsd', 'perShare']) {
+        if (typeof o[k] === 'number' && Number.isFinite(o[k])) out[k] = o[k];
+        else if (o[k] === null) out[k] = null;
+      }
+      if (Array.isArray(o.months)) out.months = months(o.months);
+      return out;
+    };
+    const p = c.proposal && typeof c.proposal === 'object' ? c.proposal : null;
+    return {
+      id: id(c.id, 'chg'),
+      key: text(c.key, 120),
+      holdingId: typeof c.holdingId === 'string' ? c.holdingId.slice(0, 64) : null,
+      name: text(c.name) || '銘柄',
+      code: normCode(c.code),
+      kind: CHANGE_KINDS.includes(c.kind) ? c.kind : 'split',
+      source: c.source === 'manual' ? 'manual' : 'auto',
+      status: CHANGE_STATUS.includes(c.status) ? c.status : 'pending',
+      seen: c.seen === true,
+      eventDate: U.isDateStr(c.eventDate) ? c.eventDate : null,
+      at: iso(c.at),
+      ratio: typeof c.ratio === 'number' && c.ratio > 0 && Number.isFinite(c.ratio) ? c.ratio : null,
+      before: nums(c.before),
+      after: nums(c.after),
+      proposal: p
+        ? {
+            perShare: num(p.perShare),
+            months: months(p.months),
+            reason: p.reason === 'changed' ? 'changed' : 'none',
+            events: list(p.events)
+              .filter((e) => U.isDateStr(e.date) && typeof e.amount === 'number' && e.amount > 0)
+              .slice(0, 12)
+              .map((e) => ({ date: e.date, amount: round(e.amount, 4) })),
+          }
+        : null,
+      note: text(c.note, 200),
     };
   }
 
@@ -214,6 +267,9 @@
         .filter((t) => t.entry && typeof t.entry === 'object' && U.isDateStr(t.entry.date))
         .map(cleanTrash)
     ).slice(0, TRASH_MAX);
+    a.changes = uniqueById(list(raw.changes).map(cleanChange)).slice(0, CHANGES_MAX);
+    const ec = raw.eventsCheck && typeof raw.eventsCheck === 'object' ? raw.eventsCheck : {};
+    a.eventsCheck = { at: iso(ec.at), unsupportedAt: iso(ec.unsupportedAt), error: ec.error ? text(ec.error, 200) : null };
     const fx = raw.fx && typeof raw.fx === 'object' ? raw.fx : {};
     a.fx = { rate: num(fx.rate) || null, source: ['auto', 'manual'].includes(fx.source) ? fx.source : null, at: iso(fx.at) };
     a.lastUpdateAt = iso(raw.lastUpdateAt);
@@ -524,6 +580,8 @@
   function saveHolding(a, draft) {
     const h = cleanHolding(draft);
     const i = a.holdings.findIndex((x) => x.id === h.id);
+    // 別の銘柄に変えたら、分割・配当の確認は最初からやり直す
+    if (i >= 0 && (a.holdings[i].code !== h.code || a.holdings[i].type !== h.type)) h.eventsSince = null;
     if (i >= 0) a.holdings[i] = h;
     else a.holdings.push(h);
     a.recent = { broker: h.broker, account: h.account, type: h.type };
@@ -846,6 +904,12 @@
       d.schemaVersion = 11;
       return d;
     });
+    // v11 → v12:株式分割・配当の自動確認(株の変更のお知らせ changes・確認の状態 eventsCheck・銘柄ごとの eventsSince)。
+    // 足すものは読み込み時に空で入る。今の保有・配当の内容はそのまま
+    MT.store.addMigration(11, (d) => {
+      d.schemaVersion = 12;
+      return d;
+    });
   }
 
   MT.assetsModel = {
@@ -886,6 +950,8 @@
     historyFlags,
     setHistoryMemo,
     autoUpdateDue,
+    cleanChange,
+    CHANGES_MAX,
     TRASH_REASONS,
     TRASH_MAX,
     HISTORY_MEMO_MAX,

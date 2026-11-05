@@ -187,6 +187,7 @@
         { label: '編集', onSelect: () => openHoldingSheet(hid) },
         { label: '買い増し', onSelect: () => openBuyMoreSheet(hid) },
         { label: '配当・優待', onSelect: () => openDividendSheet(hid) },
+        x.type !== 'fund' ? { label: '株式分割・併合を反映', onSelect: () => MT.assetsChangesUI.openSplitSheet(hid) } : null,
       ],
     });
   }

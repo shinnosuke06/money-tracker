@@ -20,16 +20,17 @@
  *   v8 → v9:将来予想のプランに、取り崩しの設定(drawdown)を追加(js/features/future/model.js)
  *   v9 → v10:資産の履歴に、削除・修正前の履歴(historyTrash)と「手で直した」印を追加(js/features/assets/model.js)
  *   v10 → v11:資産の履歴に、その日のコメント(memo)を追加(js/features/assets/model.js)
+ *   v11 → v12:株式分割・配当の自動確認(株の変更のお知らせ)を追加(js/features/assets/model.js・events.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 11;
+  const SCHEMA_VERSION = 12;
   // アプリの版。設定に出し、新しい版の確認(js/core/update.js)にも使う。
   // 変更を出すたびに上げ、index.html の各ファイルの ?v= も同じ値にそろえる(テストで確かめる)
-  const APP_VERSION = '2026.11.05-1';
+  const APP_VERSION = '2026.11.05-2';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

@@ -11,6 +11,9 @@
  *            ③ それも取れなければ設定の手入力値、④ 無ければ前回使った値のまま
  *            取れなかった理由は、どこで・なぜかを結果に出す
  *    (Finnhub は米国株の株価(ドル)だけに使う)
+ *  - 株式分割・配当の記録(1 日 1 回ほど):設定の URL に GET ?events=1&codes=X101,US:XYZ&range=2y
+ *      返事 { version: "events-v1", events: { コード: { splits: [{ date, numerator, denominator }], dividends: [{ date, amount }] } }, errors: { コード: 理由 } }
+ *      version が違えば「対応していない」(GAS に tools/gas/events.gs を足す)。反映は js/features/assets/events.js
  * 送るのは銘柄コードだけ(数量や金額は送らない)。URL とキーは MT.secrets から読む。
  * 取りに行って取れなかった銘柄と、コードが無い銘柄には理由を付ける(URL・キーが未設定のときは、お知らせだけ)。
  * 価格が取れるかは種別とコードで決まり、証券会社の違いは関係しない。
@@ -227,5 +230,58 @@
     return { ok, failed };
   }
 
-  MT.assetPrices = { VERSION, PUBLIC_FX, fetchPrices, countReport };
+  const EVENTS_VERSION = 'events-v1';
+
+  /**
+   * 株式分割・配当の記録を取りに行く(データは書き換えない。反映は MT.assetEvents.applyEvents)
+   * @returns {Promise<{events: object, errors: object, unsupported: boolean, error: string|null}>}
+   */
+  async function fetchEvents({ assets, secrets, fetchImpl, timeoutMs = TIMEOUT_MS * 2 }) {
+    const doFetch = fetchImpl || ((url, opts) => root.fetch(url, opts));
+    const out = { events: {}, errors: {}, unsupported: false, error: null };
+    const EV = MT.assetEvents;
+    const codes = [...new Set(assets.holdings.map(EV.eventCode).filter(Boolean))];
+    if (!secrets.priceUrl || !codes.length) return out;
+    let url;
+    try {
+      url = new URL(secrets.priceUrl);
+    } catch (e) {
+      out.error = '価格取得のURLが正しくありません';
+      return out;
+    }
+    url.searchParams.set('events', '1');
+    url.searchParams.set('codes', codes.join(','));
+    url.searchParams.set('range', '2y');
+    let json;
+    try {
+      json = await getJson(url.toString(), doFetch, timeoutMs);
+    } catch (e) {
+      out.error = errorText(e);
+      return out;
+    }
+    if (!json || json.version !== EVENTS_VERSION || !json.events || typeof json.events !== 'object') {
+      out.unsupported = true;
+      return out;
+    }
+    const day = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+    for (const c of codes) {
+      const ev = json.events[c];
+      if (!ev || typeof ev !== 'object') {
+        if (json.errors && json.errors[c]) out.errors[c] = String(json.errors[c]).slice(0, 120);
+        continue;
+      }
+      const arr = (x) => (Array.isArray(x) ? x : []);
+      out.events[c] = {
+        splits: arr(ev.splits)
+          .map((s) => ({ date: day(s && s.date), numerator: toNum(s && s.numerator), denominator: toNum(s && s.denominator) }))
+          .filter((s) => s.date && s.numerator > 0 && s.denominator > 0),
+        dividends: arr(ev.dividends)
+          .map((d) => ({ date: day(d && d.date), amount: toNum(d && d.amount) }))
+          .filter((d) => d.date && d.amount > 0),
+      };
+    }
+    return out;
+  }
+
+  MT.assetPrices = { VERSION, EVENTS_VERSION, PUBLIC_FX, fetchPrices, fetchEvents, countReport };
 })(typeof window !== 'undefined' ? window : globalThis);
