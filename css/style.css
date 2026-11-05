@@ -4066,3 +4066,95 @@ a.btn {
   margin-top: -4px;
   text-align: right;
 }
+
+/* ---------------------------------------------------------------
+   株の変更のお知らせ(js/features/assets/changes.js)
+   確認するまで、変わった所に色を付ける
+   --------------------------------------------------------------- */
+.chip-change {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.pay-row.is-changed {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+mark.is-new {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+s.was {
+  color: var(--text-3);
+}
+.notice-list {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  font-size: 14px;
+}
+.notice-list li + li {
+  margin-top: 2px;
+}
+.chg-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.chg-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.chg-item:last-child {
+  border-bottom: 0;
+}
+.chg-item.is-changed {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.chg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chg-name {
+  font-weight: 700;
+  min-width: 0;
+}
+.chg-name .code {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.chg-what {
+  margin: 6px 0 4px;
+  font-size: 14px;
+}
+.chg-diffs {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0;
+}
+.chg-diff {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.chg-diff-label {
+  color: var(--text-2);
+}
+.chg-diff-value {
+  text-align: right;
+}
+.chg-at {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.chg-actions {
+  margin-top: 8px;
+}
