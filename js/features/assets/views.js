@@ -391,7 +391,8 @@
           { class: 'button-row' },
           updateButton(),
           btn('まとめて貼り付け', { size: 'small', onClick: F.openPasteSheet }),
-          a.holdings.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderHoldingsFlow }) : null
+          a.holdings.length > 1 ? btn('並べ替え', { size: 'small', onClick: reorderHoldingsFlow }) : null,
+          h('a', { class: 'btn btn-secondary btn-small', href: '#/assets/changes' }, h('span', { text: '分割・配当の確認' }))
         )
       )
     );
