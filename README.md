@@ -602,7 +602,7 @@ JSON の書き出しには既定で含めず、書き出すときに「含める
   `{ "version": "v6", "results": { "コード": 価格 }, "errors": ["コード"], "errorDetails": { "コード": "理由" } }`。
   `version` が `"v6"` でなければ「URLが古い、または別のものです」と表示し、価格は何も更新しない。
 - **米国株**:Finnhub の quote API(`https://finnhub.io/api/v1/quote`)の `c`(ドル)に USD/JPY を掛ける。キーが無いときは、銘柄の編集でドルの株価を手入力する。
-- **USD/JPY**:次の順に使う。① 上の URL に為替のコード(既定 `USDJPY`)も一緒に問い合わせる(GAS が為替に対応しているとき)→ ② 返事に無いとき・失敗したときは、キー不要の公開の為替レート:(a) Frankfurter(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY`。欧州中央銀行の基準値。旧 `api.frankfurter.app` は移転して転送になったため変えた)→ (b) currency-api(`cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json`。毎日更新)→ ③ 設定の手入力値 → ④ 前回使った値のまま。Finnhub は米国株の株価(ドル)だけに使い、為替には使わない。取れなかったときは、どこで・なぜ取れなかったか(価格取得のURL・Frankfurter・currency-api)を「価格を更新」の結果に出す。どれも無いと、米国株は円に換算できず「価格未取得」(保有の一覧に「USD/JPY が無いため円に換算できません」と出る)。
+- **USD/JPY**:次の順に使う。① 上の URL に為替のコード(既定 `USDJPY`)も一緒に問い合わせる(GAS が為替に対応しているとき)→ ② 返事に無いとき・失敗したときは、キー不要の公開の為替レート:(a) Frankfurter(`https://api.frankfurter.dev/v1/latest?base=USD&symbols=JPY`。欧州中央銀行の基準値。旧 `api.frankfurter.app` は移転して転送になったため変えた)→ (b) currency-api(`cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json`。毎日更新)→ ③ 設定の手入力値 → ④ 前回使った値のまま。公開の為替レートは平日に1日1回だけ更新される(欧州中央銀行の基準値)ため、同じ日は何回「価格を更新」しても同じ値になる(土日・祝日は前の平日の値)。このことは、価格の更新の結果・資産のダッシュボードの USD/JPY の表示・設定の説明に一文で出す。Finnhub は米国株の株価(ドル)だけに使い、為替には使わない。取れなかったときは、どこで・なぜ取れなかったか(価格取得のURL・Frankfurter・currency-api)を「価格を更新」の結果に出す。どれも無いと、米国株は円に換算できず「価格未取得」(保有の一覧に「USD/JPY が無いため円に換算できません」と出る)。
 - URL が無い国内株・投資信託も、銘柄の編集で価格を手入力できる。
 - 価格が取れるかは種別(国内株・投資信託・米国株)とコード、URL・キーの設定で決まり、証券会社の違いは関係しない。
 - 取れなかった銘柄には理由を付け、「価格を更新」の結果を証券会社ごとに出す。保有の一覧でも、価格の無い銘柄に「取れない理由」を出す(コード未入力 / URL・キー未設定 / 取得失敗の理由 / まだ更新していない)。

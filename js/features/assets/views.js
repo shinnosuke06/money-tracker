@@ -298,7 +298,7 @@
     if (MT.assetsAuto && MT.assetsAuto.enabled() && A.autoUpdateDue(a, { secrets: sec, minMinutes: 0 })) parts.push(`開いたときに自動で更新(前回から${A.AUTO_MIN_MINUTES}分以上たっていたら)`);
     if (!sec.priceUrl) parts.push('国内株・投資信託の価格取得URLが未設定');
     if (a.holdings.some((x) => x.type === 'us') && !sec.finnhubKey) parts.push('Finnhub のキーが未設定(米国株は手入力)');
-    if (a.fx.rate) parts.push(`USD/JPY ${a.fx.rate}(${a.fx.source === 'auto' ? '自動' : '手入力'})`);
+    if (a.fx.rate) parts.push(`USD/JPY ${a.fx.rate}(${a.fx.source === 'auto' ? '自動。公開の為替レートは平日に1日1回の更新なので、同じ日は同じ値です' : '手入力'})`);
     return parts.length ? parts.join('・') : '';
   }
 
