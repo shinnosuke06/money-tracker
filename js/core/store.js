@@ -31,7 +31,7 @@
   const SCHEMA_VERSION = 13;
   // アプリの版。設定に出し、新しい版の確認(js/core/update.js)にも使う。
   // 変更を出すたびに上げ、index.html の各ファイルの ?v= も同じ値にそろえる(テストで確かめる)
-  const APP_VERSION = '2026.11.05-4';
+  const APP_VERSION = '2026.11.09-1';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

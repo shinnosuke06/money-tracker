@@ -181,7 +181,7 @@
       const why = tried.length ? `(${tried.join(' / ')})` : '';
       if (rate > 0) {
         report.fx = { rate, source: 'auto' };
-        if (from) report.messages.push(`USD/JPY:${from}の ${rate} を使いました`);
+        if (from) report.messages.push(`USD/JPY:${from}の ${rate} を使いました。公開の為替レートは平日に1日1回だけ更新されるため、同じ日は何回「価格を更新」しても同じ値です(土日・祝日は前の平日の値)`);
       } else if (s.fxManual > 0) {
         report.fx = { rate: s.fxManual, source: 'manual' };
         report.messages.push(`USD/JPY:自動で取得できなかったため、設定の値(${s.fxManual})を使いました${why}`);
