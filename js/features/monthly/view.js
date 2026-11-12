@@ -17,6 +17,7 @@
   const state = {
     scrollLeft: null, // 表の横スクロール位置(null なら右端=最新へ)
     focusYM: null, // 次の描画でこの月が見えるようにスクロール
+    focusGroup: null, // 次の描画でフォーカスを戻す、まとめの見出しのキー
   };
 
   const monthly = () => store.get().monthly;
@@ -59,6 +60,11 @@
     container.append(chartCard);
 
     restoreTableScroll(tableCard);
+    if (state.focusGroup) {
+      const gb = [...tableCard.querySelectorAll('.group-btn')].find((x) => x.dataset.key === state.focusGroup);
+      if (gb) gb.focus({ preventScroll: true });
+      state.focusGroup = null;
+    }
     MT.monthlyChart.render(chartCard.querySelector('canvas'), chartCard.querySelector('.chart-fallback'), m, mode);
   }
 
@@ -232,7 +238,50 @@
           )
         );
       }
-      for (const it of counted) rows.push(renderItemRow(m, months, it, stale.has(it.id)));
+      for (const b of M.blocks(counted)) {
+        if (!b.group) {
+          rows.push(renderItemRow(m, months, b.items[0], stale.has(b.items[0].id)));
+          continue;
+        }
+        // まとめ(証券会社など):見出しに小計、その下に内訳。見出しを押すとたたむ
+        const key = groupKey(g.category.id, b.group);
+        const open = !isCollapsed(key);
+        const staleIn = b.items.filter((it) => stale.has(it.id)).length;
+        rows.push(
+          h(
+            'tr',
+            { class: 'row-group' },
+            h(
+              'th',
+              { class: 'col-name', scope: 'row' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'group-btn',
+                  dataset: { action: 'group', key },
+                  'aria-expanded': String(open),
+                  'aria-label': `${b.group}(内訳 ${b.items.length}件)を${open ? 'たたむ' : '開く'}`,
+                },
+                h('span', { class: `group-caret${open ? ' is-open' : ''}`, 'aria-hidden': 'true', text: '▸' }),
+                h(
+                  'span',
+                  { class: 'group-text' },
+                  h('span', { class: 'item-name', text: b.group }),
+                  h(
+                    'span',
+                    { class: 'item-meta' },
+                    !open && staleIn ? h('span', { class: 'badge-stale', text: `未更新 ${staleIn}` }) : null,
+                    h('span', { text: `内訳 ${b.items.length}件` })
+                  )
+                )
+              )
+            ),
+            months.map((ym) => h('td', { class: 'col-month num', text: U.yen(M.groupTotal(m, ym, g.category.id, b.group)) }))
+          )
+        );
+        if (open) for (const it of b.items) rows.push(renderItemRow(m, months, it, stale.has(it.id), { child: true }));
+      }
     }
 
     rows.push(
@@ -322,17 +371,35 @@
     );
   }
 
-  function renderItemRow(m, months, it, isStale) {
+  // まとめをたたんだ状態(端末ごと)。キーは「区分ID|まとめの名前」
+  const COLLAPSE_PREF = 'monthlyCollapsedGroups';
+  const groupKey = (categoryId, group) => `${categoryId}|${group}`;
+  function collapsedKeys() {
+    const v = U.prefs.get(COLLAPSE_PREF, []);
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+  }
+  const isCollapsed = (key) => collapsedKeys().includes(key);
+  function toggleGroup(key) {
+    const list = collapsedKeys();
+    const i = list.indexOf(key);
+    if (i >= 0) list.splice(i, 1);
+    else list.push(key);
+    U.prefs.set(COLLAPSE_PREF, list.slice(-100));
+    state.focusGroup = key; // 描き直したあと、押したボタンにフォーカスを戻す
+    MT.app.rerender();
+  }
+
+  function renderItemRow(m, months, it, isStale, { child = false } = {}) {
     const meta = [];
     if (isStale) meta.push(h('span', { class: 'badge-stale', text: '未更新' }));
     meta.push(h('span', { text: it.lastUpdated ? `最終 ${U.shortDate(it.lastUpdated)}` : '未入力' }));
     return h(
       'tr',
-      { class: 'row-item' },
+      { class: child ? 'row-item row-child' : 'row-item' },
       h(
         'th',
         { class: 'col-name', scope: 'row' },
-        h('span', { class: 'item-name', text: it.name }),
+        h('span', { class: 'item-name', text: child ? M.itemLabel(it) : it.name }),
         h('span', { class: 'item-meta' }, meta)
       ),
       months.map((ym) => {
@@ -363,8 +430,9 @@
   function onTableClick(e) {
     const b = e.target.closest('[data-action]');
     if (!b) return;
-    const { action, ym, item } = b.dataset;
-    if (action === 'input') openInputSheet(ym, item);
+    const { action, ym, item, key } = b.dataset;
+    if (action === 'group') toggleGroup(key);
+    else if (action === 'input') openInputSheet(ym, item);
     else if (action === 'month') openMonthMenu(ym);
     else if (action === 'memo') openMemoSheet(ym);
   }
@@ -509,7 +577,8 @@
       const list = M.displayItems(m);
       const pos = list.findIndex((x) => x.id === id) + 1;
       s.setTitle(it.name);
-      sub.textContent = `${U.ymLabel(ym)}末 ・ ${it.reference ? '参考行(合計に含めない)' : cat ? cat.name : ''}(${pos}/${list.length})`;
+      const where = it.reference ? '参考行(合計に含めない)' : `${cat ? cat.name : ''}${M.groupOf(it) ? ` / ${M.groupOf(it)}` : ''}`;
+      sub.textContent = `${U.ymLabel(ym)}末 ・ ${where}(${pos}/${list.length})`;
 
       const pk = M.prevRecordKey(m, ym);
       prevValue = pk ? M.getValue(m, pk, id) : null;

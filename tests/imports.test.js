@@ -432,3 +432,95 @@ test('サンプル:v5 の形で、取り込みの履歴は空', () => {
   assert.deepEqual(d.imports, { log: [], undo: null });
   assert.ok(d.monthly.items.every((x) => x.reference === false));
 });
+
+// ---------------------------------------------------------------
+// まとめ(証券会社など)の取り込み
+// ---------------------------------------------------------------
+
+// 架空の口座資産の表:同じ証券会社の内訳が括弧つきで並ぶ
+const GROUPED_TABLE = tsv([
+  ['口座', '10月', '11月'],
+  ['銀行A(本店)', '100', '110'],
+  ['銀行A(支店)', '10', '11'],
+  ['架空証券(国内株式)', '1,000', '1,100'],
+  ['架空証券(米国株式)', '2,000', '2,100'],
+  ['架空(預かり)', '30', '31'],
+  ['証券Z(特定口座)', '500', '510'],
+  ['ポイント運用A', '40', '41'],
+  ['資産合計', '3,680', '3,903'],
+  ['架空証券(含み益)', '300', '310'],
+]);
+
+test('まとめの推測:括弧の前が同じ 2 行以上をまとめにし、括弧の前が短い行は長いまとめへ。1 行だけ・参考行はまとめない', () => {
+  const names = ['銀行A(本店)', '銀行A(支店)', '架空証券(国内株式)', '架空証券（米国株式）', '架空(預かり)', '証券Z(特定口座)', 'ポイント運用A', '架空証券(含み益)'];
+  const use = names.map((_, i) => i !== 7);
+  assert.deepEqual(IM.groupGuess(names, use), ['銀行A', '銀行A', '架空証券', '架空証券', '架空証券', '', '', '']);
+  // 括弧の前が 2 つのまとめの始まりと同じときは、どちらにも入れない
+  const amb = ['架空証券(国内株式)', '架空証券(米国株式)', '架空銀行(本店)', '架空銀行(支店)', '架空(預かり)'];
+  assert.deepEqual(IM.groupGuess(amb, amb.map(() => true)), ['架空証券', '架空証券', '架空銀行', '架空銀行', '']);
+});
+
+test('月末記録:まとめを推測して新しい項目に付け、まとめの区分はいちばん多い区分(預かりも証券会社の区分)。元の表の合計と一致', () => {
+  const d = freshData();
+  const t = T.analyze(GROUPED_TABLE);
+  const ch = IM.monthlyDefaults(d, t, NOW);
+  ch.startYM = '2026-10';
+  const byName = (n) => ch.rows[t.rows.findIndex((r) => r.name === n)];
+  assert.equal(byName('架空(預かり)').group, '架空証券');
+  assert.equal(byName('架空(預かり)').categoryId, 'cat_invest');
+  assert.equal(byName('銀行A(本店)').categoryId, 'cat_cash');
+  assert.equal(byName('証券Z(特定口座)').group, '');
+  assert.equal(byName('架空証券(含み益)').status, 'reference');
+  assert.equal(byName('架空証券(含み益)').group, '');
+  const plan = IM.buildMonthlyPlan(d, t, ch);
+  assert.deepEqual(plan.checks.map((c) => c.diff), [0, 0]);
+  assert.equal(IM.applyMonthlyImport(d, t, ch, { today: TODAY, now: NOW }).ok, true);
+  const m = d.monthly;
+  assert.equal(M.groupTotal(m, '2026-11', 'cat_invest', '架空証券'), 3231);
+  assert.equal(M.groupTotal(m, '2026-11', 'cat_cash', '銀行A'), 121);
+  assert.equal(M.monthTotal(m, '2026-11'), 3903);
+  const invest = M.blocks(M.groups(m).find((g) => g.category.id === 'cat_invest').items.filter((it) => !it.reference));
+  assert.deepEqual(invest.map((b) => b.group || b.items[0].name), ['架空証券', '証券Z(特定口座)', 'ポイント運用A']);
+  assert.deepEqual(invest[0].items.map((it) => M.itemLabel(it)), ['国内株式', '米国株式', '預かり']);
+});
+
+test('月末記録:行ごとにまとめを変えられ、既存の項目のまとめも変わる。元に戻すと前のまとめに戻る', () => {
+  const d = freshData();
+  const point = M.addItem(d.monthly, 'cat_invest', 'ポイント運用A');
+  const t = T.analyze(GROUPED_TABLE);
+  const ch = IM.monthlyDefaults(d, t, NOW);
+  ch.startYM = '2026-10';
+  const i = t.rows.findIndex((r) => r.name === 'ポイント運用A');
+  assert.equal(ch.rows[i].target, point.id);
+  ch.rows[i].group = '架空証券';
+  const plan = IM.buildMonthlyPlan(d, t, ch);
+  assert.equal(plan.rows[i].groupChange, true);
+  IM.applyMonthlyImport(d, t, ch, { today: TODAY, now: NOW });
+  assert.equal(M.groupOf(M.findItem(d.monthly, point.id)), '架空証券');
+  assert.equal(M.groupTotal(d.monthly, '2026-11', 'cat_invest', '架空証券'), 3272);
+  IM.undoLast(d);
+  assert.equal(M.groupOf(M.findItem(d.monthly, point.id)), '');
+  // 書き出して読み込んでも、元に戻すための控えのまとめは残る
+  const again = IM.monthlyDefaults(d, t, NOW);
+  again.startYM = '2026-10';
+  again.rows[i].group = '架空証券';
+  IM.applyMonthlyImport(d, t, again, { today: TODAY, now: NOW });
+  const restored = store.prepare(JSON.parse(JSON.stringify(d)));
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.data.imports.undo.groups, [{ itemId: point.id, prev: '' }]);
+});
+
+test('月末記録:今ある「まとめと同じ名前」の項目に値があると、二重に数える項目として知らせる', () => {
+  const d = freshData();
+  const whole = M.addItem(d.monthly, 'cat_invest', '架空証券');
+  M.addMonth(d.monthly, '2026-11', { copy: false });
+  M.setValue(d.monthly, '2026-11', whole.id, 3231, TODAY);
+  const t = T.analyze(GROUPED_TABLE);
+  const ch = IM.monthlyDefaults(d, t, NOW);
+  ch.startYM = '2026-10';
+  const plan = IM.buildMonthlyPlan(d, t, ch);
+  assert.deepEqual(plan.doubles, [{ itemId: whole.id, name: '架空証券', months: ['2026-11'] }]);
+  // その項目を参考行にしてあれば知らせない
+  M.setReference(d.monthly, whole.id, true);
+  assert.deepEqual(IM.buildMonthlyPlan(d, t, ch).doubles, []);
+});
