@@ -178,3 +178,110 @@ test('書き出したデータを読み込むと同じ内容に戻る', () => {
   assert.equal(res.ok, true);
   assert.deepEqual(res.data.monthly, store.get().monthly);
 });
+
+// ---- まとめ(証券会社など):見出しに小計、その下に内訳 ----
+
+function groupedMonthly() {
+  const m = M.create();
+  const bank = M.addItem(m, 'cat_cash', '架空銀行');
+  const jp = M.addItem(m, 'cat_invest', '証券A(国内株式)', { group: '証券A' });
+  const solo = M.addItem(m, 'cat_invest', '証券B');
+  const us = M.addItem(m, 'cat_invest', '証券A(米国株式)', { group: '証券A' });
+  const fund = M.addItem(m, 'cat_invest', '証券A(投資信託)', { group: '証券A' });
+  const ref = M.addItem(m, 'cat_invest', '証券A(含み益)', { reference: true });
+  M.addMonth(m, '2026-10', { copy: false });
+  const put = (it, v) => M.setValue(m, '2026-10', it.id, v, '2026-10-31');
+  put(bank, 100);
+  put(jp, 1000);
+  put(solo, 50);
+  put(us, 2000);
+  put(fund, 3000);
+  put(ref, 999);
+  return { m, bank, jp, solo, us, fund, ref };
+}
+
+test('まとめ:同じまとめの項目は続けて並び、小計は内訳の合計(参考行は含めない)。総資産は変わらない', () => {
+  const { m, jp, solo, us, fund } = groupedMonthly();
+  const invest = M.groups(m).find((g) => g.category.id === 'cat_invest').items.filter((it) => !it.reference);
+  assert.deepEqual(invest.map((it) => it.id), [jp.id, us.id, fund.id, solo.id]); // 後から足した内訳もまとめの所へ
+  const bl = M.blocks(invest);
+  assert.deepEqual(bl.map((b) => [b.group, b.items.length]), [['証券A', 3], ['', 1]]);
+  assert.equal(M.groupTotal(m, '2026-10', 'cat_invest', '証券A'), 6000);
+  assert.equal(M.categoryTotal(m, '2026-10', 'cat_invest'), 6050);
+  assert.equal(M.monthTotal(m, '2026-10'), 6150);
+  assert.deepEqual(M.groupNames(m, 'cat_invest'), ['証券A']);
+  assert.deepEqual(M.groupNames(m, 'cat_cash'), []);
+});
+
+test('まとめ:内訳の短い名前は括弧の中(括弧の前がまとめの名前の一部でもよい)。当てはまらなければ名前のまま', () => {
+  const it = (name, group) => ({ name, group });
+  assert.equal(M.itemLabel(it('証券A(国内株式)', '証券A')), '国内株式');
+  assert.equal(M.itemLabel(it('証券A（投資信託）', '証券A')), '投資信託');
+  assert.equal(M.itemLabel(it('証券(預かり、ハイブリッド)', '証券A')), '預かり、ハイブリッド');
+  assert.equal(M.itemLabel(it('証券A 特定口座', '証券A')), '特定口座');
+  assert.equal(M.itemLabel(it('ポイント運用A', '証券A')), 'ポイント運用A');
+  assert.equal(M.itemLabel(it('証券A(国内株式)', '')), '証券A(国内株式)');
+});
+
+test('まとめ:並べ替えは、まとめの中ならその中で、まとめに入っていない項目はまとめを飛び越え、まとめごとも動かせる', () => {
+  const { m, jp, solo, us, fund } = groupedMonthly();
+  const order = () => m.items.filter((it) => it.categoryId === 'cat_invest' && !it.reference).map((it) => it.id);
+  assert.equal(M.moveItem(m, jp.id, -1), false); // まとめの先頭より上へは出ない
+  assert.equal(M.moveItem(m, fund.id, 1), false); // まとめの最後より下へは出ない(参考行は別)
+  assert.equal(M.moveItem(m, us.id, -1), true);
+  assert.deepEqual(order(), [us.id, jp.id, fund.id, solo.id]);
+  assert.equal(M.moveItem(m, solo.id, -1), true); // まとめ全体を飛び越える
+  assert.deepEqual(order(), [solo.id, us.id, jp.id, fund.id]);
+  assert.equal(M.moveGroup(m, 'cat_invest', '証券A', -1), true);
+  assert.deepEqual(order(), [us.id, jp.id, fund.id, solo.id]);
+  assert.equal(M.moveGroup(m, 'cat_invest', '証券A', -1), false);
+  // ほかの区分の項目の位置は変わらない
+  assert.equal(m.items[0].categoryId, 'cat_cash');
+});
+
+test('まとめ:入れる・外す・名前の変更(同じ名前なら 1 つに)・解く', () => {
+  const { m, jp, solo, us, fund } = groupedMonthly();
+  assert.equal(M.setGroup(m, solo.id, '証券A'), true);
+  assert.equal(M.groupTotal(m, '2026-10', 'cat_invest', '証券A'), 6050);
+  assert.deepEqual(M.blocks(m.items.filter((it) => it.categoryId === 'cat_invest' && !it.reference)).map((b) => b.items.length), [4]);
+  assert.equal(M.setGroup(m, solo.id, ''), true);
+  assert.equal(M.groupOf(M.findItem(m, solo.id)), '');
+  assert.equal(M.setGroup(m, solo.id, '証券B'), true);
+  assert.equal(M.renameGroup(m, 'cat_invest', '証券B', '証券A'), true); // 1 つにまとまる
+  assert.deepEqual(M.groupNames(m, 'cat_invest'), ['証券A']);
+  assert.equal(M.renameGroup(m, 'cat_invest', '証券A', ''), true); // 解く
+  assert.deepEqual(M.groupNames(m, 'cat_invest'), []);
+  for (const it of [jp, us, fund, solo]) assert.ok(M.findItem(m, it.id)); // 項目は残る
+  assert.equal(M.monthTotal(m, '2026-10'), 6150);
+});
+
+test('まとめ:読み込み時に名前を整え、まとめが離れていたら続けて並べ直す。別の区分へ移すと移動先のまとめに並ぶ', () => {
+  const raw = {
+    categories: [{ id: 'cat_cash', name: '現金' }, { id: 'cat_invest', name: '投資' }],
+    items: [
+      { id: 'a', categoryId: 'cat_invest', name: '証券A(国内株式)', group: '  証券A ' },
+      { id: 'b', categoryId: 'cat_invest', name: '証券B' },
+      { id: 'c', categoryId: 'cat_invest', name: '証券A(米国株式)', group: '証券A' },
+      { id: 'd', categoryId: 'cat_cash', name: '証券A(預かり)', group: '証券A' },
+      { id: 'e', categoryId: 'cat_cash', name: '架空銀行', group: 123 },
+    ],
+    records: {},
+  };
+  const m = M.normalize(raw);
+  assert.deepEqual(m.items.map((it) => [it.id, it.group]), [['a', '証券A'], ['c', '証券A'], ['b', ''], ['d', '証券A'], ['e', '']]);
+  assert.equal(M.changeItemCategory(m, 'd', 'cat_invest'), true);
+  assert.deepEqual(m.items.filter((it) => it.categoryId === 'cat_invest').map((it) => it.id), ['a', 'c', 'd', 'b']);
+});
+
+test('v13 のデータを開くと v14 になり、項目のまとめは空(まとめなし)になる', () => {
+  store.load();
+  store.replaceAll(sample.build(new Date(2026, 10, 1)), 'テスト');
+  const v13 = JSON.parse(store.exportJSON());
+  v13.schemaVersion = 13;
+  for (const it of v13.monthly.items) delete it.group;
+  const res = store.prepare(v13);
+  assert.equal(res.ok, true);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
+  assert.equal(store.SCHEMA_VERSION, 14);
+  assert.ok(res.data.monthly.items.every((it) => it.group === ''));
+});

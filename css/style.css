@@ -669,6 +669,62 @@ button {
   font-size: 13px;
 }
 
+/* まとめ(証券会社など):見出しに小計、その下に内訳 */
+.row-group th,
+.row-group td {
+  font-weight: 700;
+}
+.grid .row-group .col-name {
+  padding: 0;
+}
+.group-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.group-btn:active {
+  background: var(--surface-2);
+}
+.group-caret {
+  flex: none;
+  width: 1em;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+.group-caret.is-open {
+  transform: rotate(90deg);
+}
+.group-text {
+  min-width: 0;
+}
+.row-group .item-meta {
+  font-weight: 500;
+}
+.grid .row-child .col-name {
+  padding-left: 28px;
+}
+.row-child .item-name {
+  font-size: 13px;
+  color: var(--text-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .group-caret {
+    transition: none;
+  }
+}
+
 .item-name {
   display: block;
   font-size: 14px;
@@ -4161,4 +4217,19 @@ s.was {
 .chip-in {
   background: var(--positive-soft);
   color: var(--positive);
+}
+
+/* 項目と区分の編集:まとめの見出しと、その中の項目 */
+.edit-group .edit-name {
+  font-weight: 700;
+}
+.edit-child .edit-name {
+  padding-left: 20px;
+}
+
+/* 取り込みの確認:月末記録の行は「扱い・区分・反映先・まとめ」の 4 つ */
+@media (min-width: 560px) {
+  .imp-row-ctrl.has-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

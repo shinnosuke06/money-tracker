@@ -12,7 +12,7 @@
  * - それ以外(価格取得の URL・為替・新しい版の確認 ?check=)は何もしない(そのままネットへ。キャッシュしない)
  * データ(localStorage)には触らない。
  */
-const VERSION = '2026.11.09-1';
+const VERSION = '2026.11.12-1';
 const CACHE = `money-tracker-${VERSION}`;
 const LIBS = 'money-tracker-libs-v1';
 const LIB_HOST = 'cdn.jsdelivr.net';

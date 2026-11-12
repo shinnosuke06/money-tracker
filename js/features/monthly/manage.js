@@ -26,7 +26,7 @@
         ),
         h('h1', { class: 'page-title page-title-sub', text: '項目と区分の編集' })
       ),
-      h('p', { class: 'hint page-hint', text: '名前をタップすると変更できます。矢印で並べ替え、「…」で移動・削除・参考行(小計・総資産に含めない)の切り替えができます。' })
+      h('p', { class: 'hint page-hint', text: '名前をタップすると変更できます。矢印で並べ替え、「…」で移動・削除・参考行(小計・総資産に含めない)の切り替え・まとめ(証券会社ごとの小計など)への出し入れができます。' })
     );
 
     for (const [ci, g] of M.groups(m).entries()) {
@@ -51,7 +51,14 @@
   function moveButtons(kind, id, isFirst, isLast, name) {
     const mover = (dir) => () => {
       pendingFocus = `${kind}-${dir < 0 ? 'up' : 'down'}-${id}`;
-      store.update((d) => (kind === 'cat' ? M.moveCategory(d.monthly, id, dir) : M.moveItem(d.monthly, id, dir)));
+      store.update((d) => {
+        if (kind === 'cat') return M.moveCategory(d.monthly, id, dir);
+        if (kind === 'group') {
+          const sep = id.indexOf('|');
+          return M.moveGroup(d.monthly, id.slice(0, sep), id.slice(sep + 1), dir);
+        }
+        return M.moveItem(d.monthly, id, dir);
+      });
     };
     return [
       h(
@@ -92,22 +99,43 @@
     const isFirst = ci === 0;
     const isLast = ci === m.categories.length - 1;
     const list = h('ul', { class: 'edit-list' });
-    g.items.forEach((it, i) => {
+    const itemRow = (it, isFirst, isLast, child) =>
+      h(
+        'li',
+        { class: child ? 'edit-row edit-child' : 'edit-row' },
+        h(
+          'button',
+          { type: 'button', class: 'edit-name', onClick: () => renameItemFlow(it) },
+          it.name,
+          it.reference ? h('small', { class: 'edit-sub', text: '参考行(小計・総資産に含めない)' }) : null,
+          isPaymentAccount(it.id) ? h('small', { class: 'edit-sub', text: '支払いの口座' }) : null
+        ),
+        moveButtons('item', it.id, isFirst, isLast, it.name),
+        h('button', { type: 'button', class: 'icon-btn', 'aria-label': `「${it.name}」のメニュー`, onClick: () => itemMenu(it) }, icon('more'))
+      );
+    const bl = M.blocks(g.items);
+    bl.forEach((b, bi) => {
+      if (!b.group) {
+        list.append(itemRow(b.items[0], bi === 0, bi === bl.length - 1, false));
+        return;
+      }
+      // まとめの見出し(↑↓ はまとめごと動かす)と、その中の項目(↑↓ はまとめの中で動く)
+      const gid = `${c.id}|${b.group}`;
       list.append(
         h(
           'li',
-          { class: 'edit-row' },
+          { class: 'edit-row edit-group' },
           h(
             'button',
-            { type: 'button', class: 'edit-name', onClick: () => renameItemFlow(it) },
-            it.name,
-            it.reference ? h('small', { class: 'edit-sub', text: '参考行(小計・総資産に含めない)' }) : null,
-            isPaymentAccount(it.id) ? h('small', { class: 'edit-sub', text: '支払いの口座' }) : null
+            { type: 'button', class: 'edit-name', onClick: () => renameGroupFlow(c, b.group) },
+            h('span', { class: 'edit-cat-label', text: `まとめ(内訳 ${b.items.length}件)` }),
+            b.group
           ),
-          moveButtons('item', it.id, i === 0, i === g.items.length - 1, it.name),
-          h('button', { type: 'button', class: 'icon-btn', 'aria-label': `「${it.name}」のメニュー`, onClick: () => itemMenu(it) }, icon('more'))
+          moveButtons('group', gid, bi === 0, bi === bl.length - 1, b.group),
+          h('button', { type: 'button', class: 'icon-btn', 'aria-label': `まとめ「${b.group}」のメニュー`, onClick: () => groupMenu(c, b.group) }, icon('more'))
         )
       );
+      b.items.forEach((it, i) => list.append(itemRow(it, i === 0, i === b.items.length - 1, true)));
     });
     if (!g.items.length) list.append(h('li', { class: 'edit-row edit-empty', text: 'まだ項目がありません' }));
 
@@ -190,10 +218,20 @@
   function itemMenu(it) {
     const m = monthly();
     const others = m.categories.filter((c) => c.id !== it.categoryId);
+    const g = M.groupOf(it);
     actionSheet({
       title: it.name,
       actions: [
         { label: '名前を変更', onSelect: () => renameItemFlow(it) },
+        { label: g ? 'まとめを変える' : 'まとめに入れる(証券会社ごとの小計など)', onSelect: () => chooseGroupFlow(it) },
+        g
+          ? {
+              label: `まとめ「${g}」から外す`,
+              onSelect: () => {
+                if (store.update((d) => M.setGroup(d.monthly, it.id, ''))) toast('まとめから外しました');
+              },
+            }
+          : null,
         others.length ? { label: '別の区分へ移動', onSelect: () => moveItemFlow(it, others) } : null,
         {
           label: it.reference ? '小計・総資産に含める(参考行をやめる)' : '参考行にする(小計・総資産に含めない)',
@@ -204,6 +242,62 @@
         { label: '項目を削除', danger: true, onSelect: () => deleteItemFlow(it) },
       ],
     });
+  }
+
+  // ---- まとめ(証券会社など) ----
+
+  /** 項目を入れるまとめを選ぶ(同じ区分のまとめ・新しいまとめ) */
+  function chooseGroupFlow(it) {
+    const current = M.groupOf(it);
+    const names = M.groupNames(monthly(), it.categoryId).filter((n) => n !== current);
+    const put = (name) => {
+      if (store.update((d) => M.setGroup(d.monthly, it.id, name))) toast(`「${name}」に入れました`);
+    };
+    const newFlow = async () => {
+      const name = await promptDialog({
+        title: '新しいまとめ',
+        label: 'まとめの名前',
+        placeholder: '例:証券A',
+        hint: '同じまとめの項目は、表でまとめの小計の下に内訳として並びます。',
+        okLabel: '入れる',
+        maxLength: M.NAME_MAX,
+      });
+      if (name) put(name);
+    };
+    if (!names.length) {
+      newFlow();
+      return;
+    }
+    actionSheet({
+      title: `「${it.name}」を入れるまとめ`,
+      actions: [...names.map((n) => ({ label: n, onSelect: () => put(n) })), { label: '新しいまとめを作る', onSelect: newFlow }],
+    });
+  }
+
+  function groupMenu(c, group) {
+    actionSheet({
+      title: group,
+      actions: [
+        { label: 'まとめの名前を変更', onSelect: () => renameGroupFlow(c, group) },
+        {
+          label: 'まとめを解く(項目はそのまま残る)',
+          onSelect: () => {
+            if (store.update((d) => M.renameGroup(d.monthly, c.id, group, ''))) toast('まとめを解きました');
+          },
+        },
+      ],
+    });
+  }
+
+  async function renameGroupFlow(c, group) {
+    const name = await promptDialog({
+      title: 'まとめの名前を変更',
+      label: 'まとめの名前',
+      value: group,
+      hint: '同じ区分にある別のまとめと同じ名前にすると、1 つにまとまります。',
+      maxLength: M.NAME_MAX,
+    });
+    if (name && name !== group && store.update((d) => M.renameGroup(d.monthly, c.id, group, name))) toast('まとめの名前を変更しました');
   }
 
   function moveItemFlow(it, others) {
