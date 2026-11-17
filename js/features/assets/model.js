@@ -28,6 +28,7 @@
  *   changes: [{ id, key, holdingId, name, code, kind, source, status, seen, eventDate, at, ratio, before, after, proposal, note }],
  *       // 株の変更のお知らせ(株式分割・配当。新しい順・最大 200 件)。中身は js/features/assets/events.js
  *   eventsCheck: { at, unsupportedAt, error },  // 分割・配当の確認をした日時・価格取得の URL が対応していなかった日時・失敗の理由
+ *   ir: { watch, seen, since, manualEarnings },  // 開示・決算(気になる銘柄・見た開示など)。中身は js/features/assets/ir-model.js
  *   fx: { rate, source, at },         // 直近の更新で使った USD/JPY(auto / manual)
  *   lastUpdateAt,
  *   settings: { taxRate, fxManual, fxCode, reflect: { groupBy, map, manualMap } },
@@ -103,6 +104,7 @@
       historyTrash: [],
       changes: [],
       eventsCheck: { at: null, unsupportedAt: null, error: null },
+      ir: MT.assetIr ? MT.assetIr.create() : { watch: [], seen: [], since: {}, manualEarnings: {} },
       fx: { rate: null, source: null, at: null },
       lastUpdateAt: null,
       settings: { taxRate: DEFAULT_TAX, fxManual: null, fxCode: 'USDJPY', reflect: { groupBy: 'broker', map: {}, manualMap: {} } },
@@ -270,6 +272,7 @@
     a.changes = uniqueById(list(raw.changes).map(cleanChange)).slice(0, CHANGES_MAX);
     const ec = raw.eventsCheck && typeof raw.eventsCheck === 'object' ? raw.eventsCheck : {};
     a.eventsCheck = { at: iso(ec.at), unsupportedAt: iso(ec.unsupportedAt), error: ec.error ? text(ec.error, 200) : null };
+    if (MT.assetIr) a.ir = MT.assetIr.normalize(raw.ir);
     const fx = raw.fx && typeof raw.fx === 'object' ? raw.fx : {};
     a.fx = { rate: num(fx.rate) || null, source: ['auto', 'manual'].includes(fx.source) ? fx.source : null, at: iso(fx.at) };
     a.lastUpdateAt = iso(raw.lastUpdateAt);
@@ -908,6 +911,11 @@
     // 足すものは読み込み時に空で入る。今の保有・配当の内容はそのまま
     MT.store.addMigration(11, (d) => {
       d.schemaVersion = 12;
+      return d;
+    });
+    // v14 → v15:開示・決算(気になる銘柄・見た開示・手で入れた決算発表予定日)。足すものは読み込み時に空で入る
+    MT.store.addMigration(14, (d) => {
+      d.schemaVersion = 15;
       return d;
     });
   }

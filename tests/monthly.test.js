@@ -282,6 +282,6 @@ test('v13 のデータを開くと v14 になり、項目のまとめは空(ま�
   const res = store.prepare(v13);
   assert.equal(res.ok, true);
   assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
-  assert.equal(store.SCHEMA_VERSION, 14);
+  assert.ok(store.SCHEMA_VERSION >= 14);
   assert.ok(res.data.monthly.items.every((it) => it.group === ''));
 });

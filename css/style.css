@@ -4231,5 +4231,180 @@ s.was {
 @media (min-width: 560px) {
   .imp-row-ctrl.has-group {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+
+/* ---------------------------------------------------------------
+   開示・決算(js/features/assets/ir-view.js)
+   下のタブの文字:まだ見ていない開示は赤、2週間以内の決算だけなら黄色
+   --------------------------------------------------------------- */
+.tab-badge {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+.tab-badge.is-red {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+.tab-badge.is-yellow {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn-ink);
+}
+.subnav-item.is-alert {
+  font-weight: 700;
+}
+.subnav-item.is-red {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+.subnav-item.is-yellow {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn-ink);
+}
+.chip-up {
+  background: var(--positive-soft);
+  color: var(--positive);
+}
+.chip-down {
+  background: var(--negative-soft);
+  color: var(--negative);
+}
+.chip-new {
+  background: var(--danger);
+  color: var(--on-danger);
+}
+.disc-item {
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+.disc-item.is-changed {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+.disc-head {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 16px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.disc-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.disc-title {
+  font-weight: 700;
+  line-height: 1.45;
+}
+.disc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.disc-toggle {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.disc-summary {
+  display: grid;
+  gap: 8px;
+  margin: 0 16px 14px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.disc-summary .button-row {
+  margin: 0;
+}
+.sum-head {
+  margin: 0;
+  font-weight: 700;
+}
+.sum-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.sum-sec ul {
+  margin: 2px 0 0;
+  padding-left: 1.2em;
+}
+.sum-sec.is-good .sum-title {
+  color: var(--positive);
+}
+.sum-sec.is-bad .sum-title {
+  color: var(--negative);
+}
+.sum-sec.is-neutral .sum-title {
+  color: var(--text-2);
+}
+.earn-date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 4px 0 6px;
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.earn-date small {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn-text);
+}
+.earn-date.is-undecided {
+  color: var(--text-3);
+}
+.earn-date.is-undecided small {
+  font-weight: 500;
+  color: var(--text-3);
+}
+.ir-watch-add {
+  padding-bottom: 14px;
+}
+.ir-watch-row {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr auto;
+  gap: 8px;
+}
+.ir-watch-row .field-input {
+  min-width: 0;
+}
+@media (max-width: 380px) {
+  .ir-watch-row {
+    grid-template-columns: 1fr auto;
+  }
+  .ir-watch-row .field-input:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 }

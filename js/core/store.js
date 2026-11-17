@@ -22,16 +22,18 @@
  *   v10 → v11:資産の履歴に、その日のコメント(memo)を追加(js/features/assets/model.js)
  *   v11 → v12:株式分割・配当の自動確認(株の変更のお知らせ)を追加(js/features/assets/model.js・events.js)
  *   v12 → v13:入金済にしたとき優先振込先の現在残高へ足した記録(incomes[].credited)を追加(js/features/payments/model.js)
+ *   v13 → v14:月末記録の項目に「まとめ」(group。証券会社など)を追加(js/features/monthly/model.js)
+ *   v14 → v15:資産に開示・決算(assets.ir:気になる銘柄・見た開示・手で入れた決算発表予定日)を追加(js/features/assets/ir-model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 14;
+  const SCHEMA_VERSION = 15;
   // アプリの版。設定に出し、新しい版の確認(js/core/update.js)にも使う。
   // 変更を出すたびに上げ、index.html の各ファイルの ?v= も同じ値にそろえる(テストで確かめる)
-  const APP_VERSION = '2026.11.12-1';
+  const APP_VERSION = '2026.11.17-1';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

@@ -47,6 +47,7 @@
       importCard(d),
 
       priceSettingsCard(d),
+      irSettingsCard(),
 
       h(
         'section',
@@ -344,6 +345,46 @@
         btn('月末記録への反映先', { onClick: () => MT.assetsUI.openReflectMappingSheet() }),
         h('a', { class: 'btn btn-secondary', href: '#/assets/changes' }, h('span', { text: '分割・配当の確認' })),
         MT.secrets.has() ? btn('URLとキーを消す', { variant: 'ghost', className: 'btn-ghost-danger', onClick: clearSecrets }) : null
+      )
+    );
+  }
+
+  // ---- 開示・決算(資産) ----
+
+  function irSettingsCard() {
+    const { field, textInput } = MT.forms;
+    const sec = MT.secrets.get();
+    const url = textInput(sec.irUrl || '', { id: 'ir-url', type: 'url', inputmode: 'url', autocapitalize: 'off', spellcheck: 'false', placeholder: 'https://script.google.com/macros/s/…/exec', 'aria-label': '開示・決算の GAS の URL' });
+    const err = h('p', { class: 'field-error', role: 'alert', hidden: true });
+    function save() {
+      err.hidden = true;
+      const u = url.value.trim();
+      if (u && !/^https:\/\/[^\s]+$/.test(u)) {
+        err.textContent = 'URL は https:// で始まるものを入れてください';
+        err.hidden = false;
+        return;
+      }
+      MT.secrets.set({ irUrl: u });
+      toast(u ? '開示・決算の URL を保存しました' : '開示・決算の URL を消しました');
+      if (u && MT.assetIrUI) MT.assetIrUI.load({ quiet: true });
+      MT.app.rerender();
+    }
+    return h(
+      'section',
+      { class: 'card' },
+      h('h2', { class: 'card-title', text: '開示・決算(資産)' }),
+      h(
+        'div',
+        { class: 'form-stack' },
+        field('開示・決算の GAS の URL', url, 'README の「開示・決算」の手順で用意した Google Apps Script のウェブアプリの URL。価格取得の URL とは別のものです。'),
+        err
+      ),
+      h('p', { class: 'hint', text: 'URL はこの端末の中だけに保存します(JSON の書き出しには、含めると選んだときだけ入ります)。送るのは、保有している国内株と気になる銘柄のコードだけです。' }),
+      h(
+        'div',
+        { class: 'button-row' },
+        btn('保存', { variant: 'primary', onClick: save }),
+        h('a', { class: 'btn btn-secondary', href: '#/assets/ir' }, h('span', { text: '開示・決算を開く' }))
       )
     );
   }

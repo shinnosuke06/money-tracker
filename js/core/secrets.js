@@ -9,7 +9,7 @@
   const MT = (root.MT = root.MT || {});
 
   const KEY = 'moneyTracker:secrets';
-  const FIELDS = ['priceUrl', 'finnhubKey'];
+  const FIELDS = ['priceUrl', 'finnhubKey', 'irUrl']; // irUrl:開示・決算の GAS の URL
 
   function read() {
     try {
@@ -31,7 +31,7 @@
 
   MT.secrets = {
     FIELDS,
-    /** @returns {{priceUrl?: string, finnhubKey?: string}} */
+    /** @returns {{priceUrl?: string, finnhubKey?: string, irUrl?: string}} */
     get: () => clean(read()),
     has: () => Object.keys(clean(read())).length > 0,
     /** 一部だけ書き換える。空文字なら消す */
