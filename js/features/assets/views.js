@@ -6,6 +6,7 @@
  *   #/assets/summary    集計(証券会社別・口座区分別・種別別・NISA 枠・含み益・売却優先度)
  *   #/assets/dividends  配当・優待(月別カレンダー)
  *   #/assets/history    総資産の履歴を直す(js/features/assets/history.js)
+ *   #/assets/ir         開示・決算(js/features/assets/ir-view.js)
  */
 (function (root) {
   'use strict';
@@ -24,6 +25,7 @@
     { path: 'assets/manual', label: '手入力' },
     { path: 'assets/summary', label: '集計' },
     { path: 'assets/dividends', label: '配当・優待' },
+    { path: 'assets/ir', label: '開示・決算' },
   ];
 
   const yen = (v) => `${U.yen(v)}円`;
@@ -49,7 +51,11 @@
       h(
         'nav',
         { class: 'subnav', 'aria-label': '資産のメニュー' },
-        SUBNAV.map((s) => h('a', { class: 'subnav-item', href: `#/${s.path}`, 'aria-current': s.path === active ? 'page' : null, text: s.label }))
+        SUBNAV.map((s) => {
+          // 開示・決算:まだ見ていない開示があれば赤、2週間以内の決算だけなら黄色
+          const lv = s.path === 'assets/ir' && MT.assetIrUI ? MT.assetIrUI.level() : null;
+          return h('a', { class: `subnav-item${lv ? ` is-alert is-${lv}` : ''}`, href: `#/${s.path}`, 'aria-current': s.path === active ? 'page' : null, text: s.label });
+        })
       )
     );
     const unsure = a.holdings.filter((x) => x.nisaUnsure).length;
@@ -209,6 +215,8 @@
 
     const att = EV.attention(a);
     if (att.length) container.append(changesNotice(att));
+    const irNotice = MT.assetIrUI ? MT.assetIrUI.dashboardNotice() : null;
+    if (irNotice) container.append(irNotice);
 
     const prev = A.previousEntry(a, U.todayStr());
     const diff = prev ? s.total - prev.total : null;
@@ -463,6 +471,7 @@
           'span',
           { class: 'pay-meta' },
           ...changeChips(att),
+          ...(MT.assetIrUI ? MT.assetIrUI.holdingChips(x) : []),
           h('span', { class: 'chip', text: A.label(A.ACCOUNTS, x.account) }),
           h('span', { class: 'chip', text: A.label(A.TYPES, x.type) }),
           splitDone
@@ -722,10 +731,10 @@
   }
 
   MT.views = MT.views || {};
-  MT.views.assets = { render: renderDashboard, unmount: destroyCharts, needsAttention };
+  MT.views.assets = { render: renderDashboard, unmount: destroyCharts, needsAttention, tabBadge: () => (MT.assetIrUI ? MT.assetIrUI.tabBadge() : null) };
   MT.views['assets/holdings'] = { render: renderHoldings, tab: 'assets' };
   MT.views['assets/manual'] = { render: renderManual, tab: 'assets' };
   MT.views['assets/summary'] = { render: renderSummary, tab: 'assets' };
   MT.views['assets/dividends'] = { render: renderDividends, tab: 'assets' };
-  MT.assetsView = { updatePrices, checkEvents, isUpdating: () => updating };
+  MT.assetsView = { updatePrices, checkEvents, isUpdating: () => updating, head };
 })(window);

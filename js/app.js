@@ -62,7 +62,8 @@
           { class: 'tab', href: `#/${t.id}`, dataset: { tab: t.id } },
           icon(t.icon),
           h('span', { class: 'tab-label', text: t.label }),
-          h('span', { class: 'tab-dot', hidden: true, 'aria-hidden': 'true' })
+          h('span', { class: 'tab-dot', hidden: true, 'aria-hidden': 'true' }),
+          h('span', { class: 'tab-badge', hidden: true, 'aria-hidden': 'true' })
         )
       )
     );
@@ -75,8 +76,17 @@
       else a.removeAttribute('aria-current');
       const view = MT.views[id];
       const attention = !!(view && view.needsAttention && view.needsAttention());
-      a.querySelector('.tab-dot').hidden = !attention;
-      a.setAttribute('aria-label', attention ? `${a.textContent}(要確認)` : a.textContent);
+      // 文字の表示(資産の「開示・決算」など):{ text, level: 'red' | 'yellow', label }。出ているときは点の代わりに出す
+      const badge = view && view.tabBadge ? view.tabBadge() : null;
+      const b = a.querySelector('.tab-badge');
+      b.hidden = !badge;
+      if (badge) {
+        b.textContent = badge.text;
+        b.className = `tab-badge is-${badge.level}`;
+      }
+      a.querySelector('.tab-dot').hidden = !attention || !!badge;
+      const name = a.querySelector('.tab-label').textContent;
+      a.setAttribute('aria-label', `${name}${badge ? `(${badge.label || badge.text})` : ''}${attention ? '(要確認)' : ''}`);
     }
   }
 
@@ -184,6 +194,8 @@
     if (MT.monthEnd) MT.monthEnd.maybePrompt();
     // 資産の価格:開いたとき・戻ってきたときに自動で更新(前回から 30 分以上たっていたら。設定で止められる)
     if (MT.assetsAuto && res.status !== 'newer') MT.assetsAuto.start();
+    // 開示・決算:開いたとき・戻ってきたときに、GAS が集めた結果を受け取る(前回から 10 分以上たっていたら)
+    if (MT.assetIrUI && res.status !== 'newer') MT.assetIrUI.start();
 
     if (res.status === 'corrupt') {
       toast('保存データが壊れていたため、空の状態で始めました(元のデータは別名で残しています)', { type: 'error', duration: 6000 });
