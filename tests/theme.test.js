@@ -173,3 +173,38 @@ for (const [name, t] of [
     assert.ok(pg > pr && nr > ng, '緑は緑み、赤は赤みが強い');
   });
 }
+
+test('CSS:{ } の数がそろっていて、コメントが閉じている(崩れると、それより後ろの見た目がすべて効かなくなる)', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'style.css'), 'utf8');
+  let depth = 0;
+  let line = 1;
+  let inComment = false;
+  const opened = [];
+  for (let i = 0; i < css.length; i++) {
+    const c = css[i];
+    if (c === '\n') line++;
+    if (!inComment && c === '/' && css[i + 1] === '*') {
+      inComment = true;
+      i++;
+      continue;
+    }
+    if (inComment) {
+      if (c === '*' && css[i + 1] === '/') {
+        inComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (c === '{') {
+      depth++;
+      opened.push(line);
+    } else if (c === '}') {
+      depth--;
+      assert.ok(depth >= 0, `${line} 行目の } が多い`);
+      opened.pop();
+    }
+  }
+  assert.equal(inComment, false, 'コメントが閉じていない');
+  assert.equal(depth, 0, `閉じていない { がある(${opened.join('・')} 行目)`);
+  assert.doesNotMatch(css, /^(<{7}|={7}|>{7})/m, '取り込みのときの印(<<<<<<< など)が残っている');
+});
