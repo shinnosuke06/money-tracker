@@ -4231,6 +4231,8 @@ s.was {
 @media (min-width: 560px) {
   .imp-row-ctrl.has-group {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 /* ---------------------------------------------------------------
    開示・決算(js/features/assets/ir-view.js)
