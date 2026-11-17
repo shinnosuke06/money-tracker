@@ -3,8 +3,10 @@
  *
  * monthly = {
  *   categories: [{ id, name }],                       // 区分。配列の順番がそのまま表示順
- *   items:      [{ id, categoryId, name, lastUpdated, reference }], // 項目。区分内の表示順は配列の順番
+ *   items:      [{ id, categoryId, name, lastUpdated, reference, group }], // 項目。区分内の表示順は配列の順番
  *               // reference = true は「参考行」(含み益など)。記録はするが、小計・総資産には含めない
+ *               // group は「まとめ」の名前(証券会社など。'' はまとめなし)。同じ区分で同じまとめの項目は
+ *               // 並びの中で続けて置き、表ではまとめの見出し(小計)の下に内訳として出す
  *   records: {
  *     "YYYY-MM": {
  *       values:    { [itemId]: 円の整数 },
@@ -85,6 +87,86 @@
   /** 区分ごとにまとめた表示順 [{ category, items }] */
   function groups(m) {
     return m.categories.map((c) => ({ category: c, items: m.items.filter((it) => it.categoryId === c.id) }));
+  }
+
+  // ---- まとめ(証券会社など)----
+
+  const groupOf = (it) => (it && typeof it.group === 'string' ? it.group : '');
+
+  /**
+   * 項目の並びを、まとめごとのかたまりにする。まとめは最初に出てくる位置に集める。
+   * @returns {{group: string, items: object[]}[]} group が '' のかたまりは項目 1 つ
+   */
+  function blocks(items) {
+    const out = [];
+    const byName = new Map();
+    for (const it of items) {
+      const g = groupOf(it);
+      if (!g) {
+        out.push({ group: '', items: [it] });
+        continue;
+      }
+      if (!byName.has(g)) {
+        const b = { group: g, items: [] };
+        byName.set(g, b);
+        out.push(b);
+      }
+      byName.get(g).items.push(it);
+    }
+    return out;
+  }
+
+  /** 区分の中の並びを list の順に置き換える(ほかの区分の項目の位置は変えない) */
+  function reorderCategory(m, categoryId, list) {
+    let k = 0;
+    m.items = m.items.map((it) => (it.categoryId === categoryId ? list[k++] : it));
+  }
+
+  /** 同じ区分で同じまとめの項目が続けて並ぶように整える(まとめは最初に出てくる位置へ) */
+  function tidyOrder(m) {
+    for (const c of m.categories) {
+      const list = m.items.filter((it) => it.categoryId === c.id);
+      reorderCategory(m, c.id, blocks(list).flatMap((b) => b.items));
+    }
+  }
+
+  /** 区分の中にあるまとめの名前(並び順) */
+  function groupNames(m, categoryId) {
+    const names = [];
+    for (const it of m.items) {
+      const g = groupOf(it);
+      if (g && (!categoryId || it.categoryId === categoryId) && !names.includes(g)) names.push(g);
+    }
+    return names;
+  }
+
+  /** まとめの小計(参考行は含めない) */
+  function groupTotal(m, ym, categoryId, group) {
+    return sumItems(
+      m,
+      ym,
+      m.items.filter((it) => it.categoryId === categoryId && groupOf(it) === group && isCounted(it))
+    );
+  }
+
+  /**
+   * 表で内訳として出す短い名前。まとめ「証券A」の「証券A(国内株式)」→「国内株式」。
+   * 括弧の前がまとめの名前の一部(「証券(預かり)」)でも括弧の中を出す。当てはまらなければ名前のまま。
+   */
+  function itemLabel(it) {
+    const g = groupOf(it);
+    const name = it.name;
+    if (!g) return name;
+    const paren = /^(.+?)\s*[(（](.+)[)）]\s*$/.exec(name);
+    if (paren) {
+      const base = paren[1].trim();
+      if (g.startsWith(base) || base.startsWith(g)) return paren[2].trim() || name;
+    }
+    if (name.startsWith(g)) {
+      const rest = name.slice(g.length).replace(/^[\s・:：/／\-ー]+/, '').trim();
+      if (rest) return rest;
+    }
+    return name;
   }
 
   /** 表示順に並べた全項目 */
@@ -304,12 +386,54 @@
     m.categories = m.categories.filter((c) => c.id !== id);
   }
 
-  /** 項目を足す。reference: true なら参考行(小計・総資産に含めない) */
-  function addItem(m, categoryId, name, { reference = false } = {}) {
+  /** 項目を足す。reference: true なら参考行(小計・総資産に含めない)。group はまとめの名前 */
+  function addItem(m, categoryId, name, { reference = false, group = '' } = {}) {
     if (!findCategory(m, categoryId)) throw new Error('区分が見つかりません');
-    const it = { id: U.uid('itm'), categoryId, name: cleanName(name) || '新しい項目', lastUpdated: null, reference: reference === true };
+    const it = { id: U.uid('itm'), categoryId, name: cleanName(name) || '新しい項目', lastUpdated: null, reference: reference === true, group: cleanName(group) };
     m.items.push(it);
+    if (it.group) tidyOrder(m);
     return it;
+  }
+
+  /** 項目のまとめを変える('' でまとめから外す)。同じまとめの項目の後ろに並ぶ */
+  function setGroup(m, id, group) {
+    const it = findItem(m, id);
+    if (!it) return false;
+    const g = cleanName(group);
+    if (groupOf(it) === g) return false;
+    if (g) {
+      // 先にまとめから外して最後へ回し、同じまとめのかたまりの最後に入るようにする
+      m.items = m.items.filter((x) => x !== it);
+      m.items.push(it);
+    }
+    it.group = g;
+    tidyOrder(m);
+    return true;
+  }
+
+  /** 区分の中のまとめの名前を変える。to が空ならまとめを解く。ほかのまとめと同じ名前なら 1 つになる */
+  function renameGroup(m, categoryId, from, to) {
+    const g = cleanName(to);
+    let n = 0;
+    for (const it of m.items) {
+      if (it.categoryId === categoryId && groupOf(it) === from) {
+        it.group = g;
+        n++;
+      }
+    }
+    if (n) tidyOrder(m);
+    return n > 0;
+  }
+
+  /** まとめごと 1 つ上(-1)/下(+1)へ(区分の中で、となりの項目かまとめと入れ替える) */
+  function moveGroup(m, categoryId, group, dir) {
+    const list = m.items.filter((it) => it.categoryId === categoryId);
+    const bl = blocks(list);
+    const i = bl.findIndex((b) => b.group === group && group);
+    if (i < 0 || !bl[i + dir]) return false;
+    U.moveInArray(bl, i, i + dir);
+    reorderCategory(m, categoryId, bl.flatMap((b) => b.items));
+    return true;
   }
 
   /** 参考行にする(true)/ 小計・総資産に含める(false) */
@@ -323,28 +447,39 @@
     if (it && cleanName(name)) it.name = cleanName(name);
   }
 
-  /** 同じ区分の中で 1 つ上(-1)/下(+1)へ */
+  /**
+   * 同じ区分の中で 1 つ上(-1)/下(+1)へ。
+   * まとめに入っている項目は、そのまとめの中で動く。まとめに入っていない項目は、
+   * となりがまとめなら、そのまとめ全体を飛び越える。
+   */
   function moveItem(m, id, dir) {
     const it = findItem(m, id);
     if (!it) return false;
-    const siblings = m.items.filter((x) => x.categoryId === it.categoryId);
-    const pos = siblings.indexOf(it);
-    const target = siblings[pos + dir];
-    if (!target) return false;
-    const a = m.items.indexOf(it);
-    const b = m.items.indexOf(target);
-    m.items[a] = target;
-    m.items[b] = it;
+    const list = m.items.filter((x) => x.categoryId === it.categoryId);
+    const bl = blocks(list);
+    const g = groupOf(it);
+    if (g) {
+      const b = bl.find((x) => x.group === g);
+      const pos = b.items.indexOf(it);
+      if (!b.items[pos + dir]) return false;
+      U.moveInArray(b.items, pos, pos + dir);
+    } else {
+      const i = bl.findIndex((x) => x.items[0] === it);
+      if (i < 0 || !bl[i + dir]) return false;
+      U.moveInArray(bl, i, i + dir);
+    }
+    reorderCategory(m, it.categoryId, bl.flatMap((x) => x.items));
     return true;
   }
 
-  /** 別の区分へ移す(移動先の最後に並ぶ) */
+  /** 別の区分へ移す(移動先の最後に並ぶ。移動先に同じまとめがあれば、その最後) */
   function changeItemCategory(m, id, categoryId) {
     const it = findItem(m, id);
     if (!it || !findCategory(m, categoryId) || it.categoryId === categoryId) return false;
     m.items = m.items.filter((x) => x !== it);
     it.categoryId = categoryId;
     m.items.push(it);
+    if (groupOf(it)) tidyOrder(m);
     return true;
   }
 
@@ -390,8 +525,10 @@
         name: cleanName(it.name) || '名称未設定',
         lastUpdated: U.isDateStr(it.lastUpdated) ? it.lastUpdated : null,
         reference: it.reference === true,
+        group: typeof it.group === 'string' ? cleanName(it.group) : '',
       });
     }
+    tidyOrder(out);
 
     const itemIds = new Set(out.items.map((it) => it.id));
     const records = raw.records && typeof raw.records === 'object' ? raw.records : {};
@@ -431,6 +568,12 @@
       d.schemaVersion = 5;
       return d;
     });
+    // v13 → v14:月末記録の項目に「まとめ」(group。証券会社など)を足す。
+    // 読み込み時の点検(normalize)で '' が入るので、ここでは版だけ上げる(古い版のアプリがまとめを消さないように)
+    MT.store.addMigration(13, (d) => {
+      d.schemaVersion = 14;
+      return d;
+    });
   }
 
   MT.monthlyModel = {
@@ -446,6 +589,12 @@
     findItem,
     findCategory,
     groups,
+    groupOf,
+    blocks,
+    tidyOrder,
+    groupNames,
+    groupTotal,
+    itemLabel,
     orderedItems,
     countedItems,
     referenceItems,
@@ -472,6 +621,9 @@
     moveCategory,
     deleteCategory,
     addItem,
+    setGroup,
+    renameGroup,
+    moveGroup,
     setReference,
     renameItem,
     moveItem,

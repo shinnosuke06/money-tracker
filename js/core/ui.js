@@ -337,7 +337,7 @@
   }
 
   /** 文字を 1 つ入力するダイアログ。キャンセルなら null */
-  function promptDialog({ title, label, value = '', placeholder = '', okLabel = '保存', maxLength = 40 }) {
+  function promptDialog({ title, label, value = '', placeholder = '', okLabel = '保存', maxLength = 40, hint = '' }) {
     return new Promise((resolve) => {
       let result = null;
       const s = openSheet({ title, onClose: () => resolve(result) });
@@ -372,6 +372,7 @@
           },
         },
         h('label', { class: 'field-label' }, h('span', { text: label }), input),
+        hint ? h('p', { class: 'form-hint', text: hint }) : null,
         err
       );
       s.body.append(form);

@@ -118,7 +118,7 @@ test('開示・決算:問い合わせの URL と返事の確かめ(違う GAS・
   assert.equal(secrets.get().irUrl, 'https://example.invalid/exec');
 });
 
-test('開示・決算:読み込み時にそろえる(コードの形・重複・見た開示の数)。v13 のデータを開いても保有はそのまま', () => {
+test('開示・決算:読み込み時にそろえる(コードの形・重複・見た開示の数)。v14 のデータを開いても保有はそのまま', () => {
   const n = IR.normalize({ watch: [{ code: '9y3c', name: 'C' }, { code: '9Y3C' }, { code: 'bad' }], seen: [1, 1, 2, -1, 'x', ...Array.from({ length: 700 }, (_, i) => i + 10)], since: { '9x1a': NOW.toISOString(), no: 'x' }, manualEarnings: { '9X1A': { date: '2026-12-01', label: 'L' }, '9X2B': { date: 'bad' } } });
   assert.deepEqual(n.watch.map((w) => w.code), ['9Y3C']);
   assert.equal(n.seen.length, 600);
@@ -126,7 +126,7 @@ test('開示・決算:読み込み時にそろえる(コードの形・重複・
   assert.deepEqual(Object.keys(n.manualEarnings), ['9X1A']);
 
   const v13 = store.createEmpty(NOW);
-  v13.schemaVersion = 13;
+  v13.schemaVersion = 14;
   v13.assets.holdings = [{ id: 'x', broker: '証券A', account: 'tokutei', type: 'jp', code: '9X1A', name: '銘柄A', quantity: 100, avgPrice: 1000 }];
   delete v13.assets.ir;
   const res = store.prepare(JSON.parse(JSON.stringify(v13)));

@@ -99,6 +99,9 @@
       createdMonths: (Array.isArray(u.createdMonths) ? u.createdMonths : []).filter(U.isYM),
       cells,
       flags: (Array.isArray(u.flags) ? u.flags : []).filter((f) => isObj(f) && typeof f.itemId === 'string').map((f) => ({ itemId: f.itemId, prev: f.prev === true })),
+      groups: (Array.isArray(u.groups) ? u.groups : [])
+        .filter((g) => isObj(g) && typeof g.itemId === 'string')
+        .map((g) => ({ itemId: g.itemId, prev: typeof g.prev === 'string' ? g.prev.slice(0, MM.NAME_MAX) : '' })),
       lastUpdated,
     };
   }
@@ -191,23 +194,75 @@
   }
 
   /**
+   * まとめ(証券会社など)の推測。「証券A(国内株式)」のように括弧の前が同じ名前の行を 1 つのまとめにする。
+   * 括弧の前がほかのまとめの名前の始まりと同じなら(「証券(預かり)」と「証券A」)、長いほうのまとめに入れる
+   * (当てはまるまとめが 2 つ以上あるときは、どちらか決められないので入れない)。
+   * 2 行以上あるまとめだけ使う。対象にしない行(skip など)は '' を返す。
+   * @param {string[]} names 行の名前
+   * @param {boolean[]} use まとめを推測する行か
+   * @returns {string[]} 行ごとのまとめの名前('' はまとめなし)
+   */
+  function groupGuess(names, use) {
+    const baseOf = (name) => {
+      const p = /^(.+?)\s*[(（](.+)[)）]\s*$/.exec(name);
+      return p ? p[1].replace(/\s+/g, ' ').trim().slice(0, MM.NAME_MAX) : '';
+    };
+    const bases = names.map((n, i) => (use[i] ? baseOf(n) : ''));
+    const distinct = [...new Set(bases.filter(Boolean))];
+    const merged = bases.map((b) => {
+      if (!b) return '';
+      const longer = distinct.filter((x) => x !== b && x.startsWith(b));
+      return longer.length === 1 ? longer[0] : b;
+    });
+    const count = new Map();
+    for (const g of merged) if (g) count.set(g, (count.get(g) || 0) + 1);
+    return merged.map((g) => (g && count.get(g) >= 2 ? g : ''));
+  }
+
+  /**
    * 既定の選択。
    *  - 名前に「合計」「総資産」「前月比」「月平均」→ 取り込まない(計算で出す)
    *  - 最初の合計行より下の行と、名前に「含み益」→ 参考行
    *  - それ以外 → 取り込む。既存の項目名と一致すれば、その項目へ
+   *  - まとめ:既存の項目にまとめがあればそれ、無ければ名前から推測(groupGuess)。参考行には付けない
+   *  - 区分:まとめに入る新しい項目は、そのまとめの行でいちばん多い区分(「証券A(預かり)」も証券会社の区分に)
    */
   function monthlyDefaults(d, table, now = new Date()) {
     const m = d.monthly;
     const grand = grandRow(table.rows, MONTHLY_GRAND, /合計/);
     const used = new Set();
+    const statuses = table.rows.map((r, i) =>
+      MONTHLY_SKIP_RE.test(r.name) ? 'skip' : (grand >= 0 && i > grand) || REFERENCE_RE.test(r.name) ? 'reference' : 'import'
+    );
+    const guesses = groupGuess(
+      table.rows.map((r) => r.name),
+      statuses.map((s) => s === 'import')
+    );
+    // まとめごとに、いちばん多い区分の推測
+    const votes = new Map();
+    guesses.forEach((g, i) => {
+      if (!g) return;
+      const k = categoryGuess(table.rows[i].name);
+      if (!votes.has(g)) votes.set(g, []);
+      votes.get(g).push(k);
+    });
+    const groupKind = (g) => {
+      const list = votes.get(g) || [];
+      const tally = new Map();
+      for (const k of list) tally.set(k, (tally.get(k) || 0) + 1);
+      return [...tally.entries()].sort((a, b) => b[1] - a[1] || list.indexOf(a[0]) - list.indexOf(b[0]))[0][0];
+    };
     return {
       startYM: T.guessStartYM(table, now),
       cols: T.defaultColumnsOn(table.columns).map((on) => ({ on })),
       rows: table.rows.map((r, i) => {
-        const status = MONTHLY_SKIP_RE.test(r.name) ? 'skip' : (grand >= 0 && i > grand) || REFERENCE_RE.test(r.name) ? 'reference' : 'import';
+        const status = statuses[i];
         const match = status === 'skip' ? null : m.items.find((it) => !used.has(it.id) && T.nameKey(it.name) === T.nameKey(r.name));
         if (match) used.add(match.id);
-        return { status, target: match ? match.id : 'new', categoryId: match ? match.categoryId : categoryIdFor(m, categoryGuess(r.name)) };
+        const guess = guesses[i];
+        const group = status !== 'import' ? (match ? MM.groupOf(match) : '') : match && MM.groupOf(match) ? MM.groupOf(match) : guess;
+        const categoryId = match ? match.categoryId : categoryIdFor(m, guess ? groupKind(guess) : categoryGuess(r.name));
+        return { status, target: match ? match.id : 'new', categoryId, group };
       }),
       modes: {},
     };
@@ -233,6 +288,7 @@
       const item = ch.target && ch.target !== 'new' ? MM.findItem(m, ch.target) : null;
       const status = ['import', 'reference', 'skip'].includes(ch.status) ? ch.status : 'skip';
       const categoryId = item ? item.categoryId : cats.some((c) => c.id === ch.categoryId) ? ch.categoryId : cats[0].id;
+      const group = typeof ch.group === 'string' ? ch.group.replace(/\s+/g, ' ').trim().slice(0, MM.NAME_MAX) : '';
       return {
         ...r,
         index: i,
@@ -240,6 +296,8 @@
         target: item ? item.id : 'new',
         item,
         categoryId,
+        group,
+        groupChange: !!item && status !== 'skip' && MM.groupOf(item) !== group,
         flagChange: !!item && status !== 'skip' && !!item.reference !== (status === 'reference'),
         cellCount: imported.filter((c) => r.values[c.index] !== null).length,
       };
@@ -278,7 +336,17 @@
       return { month: c.month, header: c.header, byCategory, total, reference, source: sv, diff: sv === null ? null : total - sv };
     });
     const conflicts = imported.filter((c) => filledCount(m, c.month) > 0).map((c) => ({ month: c.month, filled: filledCount(m, c.month) }));
-    return { kind: 'monthly', columns, imported, rows, active, categories: cats, source, sourceName: source ? source.name : null, checks, conflicts, errors };
+
+    // 二重に数えそうな項目:今ある項目(小計・総資産に含めるもの)で、名前が取り込むまとめと同じもの
+    // (「証券A」の 1 行で記録していた所へ、内訳の「証券A(国内株式)」などを足す場合)
+    const targeted = new Set(active.map((r) => r.target));
+    const groupKeys = new Set(active.filter((r) => r.status === 'import' && r.group).map((r) => T.nameKey(r.group)));
+    const doubles = m.items
+      .filter((it) => !it.reference && !targeted.has(it.id) && groupKeys.has(T.nameKey(it.name)))
+      .map((it) => ({ itemId: it.id, name: it.name, months: imported.filter((c) => MM.getValue(m, c.month, it.id) !== null).map((c) => c.month) }))
+      .filter((x) => x.months.length);
+
+    return { kind: 'monthly', columns, imported, rows, active, categories: cats, source, sourceName: source ? source.name : null, checks, conflicts, doubles, errors };
   }
 
   /** 書き込む件数(月ごとの選択を反映)。画面のボタンと確認に使う */
@@ -311,7 +379,7 @@
     const plan = buildMonthlyPlan(d, table, choices);
     if (plan.errors.length) return { ok: false, error: plan.errors[0] };
     const m = d.monthly;
-    const undo = { id: U.uid('imp'), kind: 'monthly', addedCategories: [], addedItems: [], createdMonths: [], cells: {}, flags: [], lastUpdated: {} };
+    const undo = { id: U.uid('imp'), kind: 'monthly', addedCategories: [], addedItems: [], createdMonths: [], cells: {}, flags: [], groups: [], lastUpdated: {} };
     if (!m.categories.length) {
       for (const c of MM.DEFAULT_CATEGORIES) {
         m.categories.push({ ...c });
@@ -323,7 +391,7 @@
       const wantRef = r.status === 'reference';
       let it;
       if (r.target === 'new') {
-        it = MM.addItem(m, r.categoryId, r.name, { reference: wantRef });
+        it = MM.addItem(m, r.categoryId, r.name, { reference: wantRef, group: r.group });
         undo.addedItems.push(it.id);
       } else {
         it = MM.findItem(m, r.target);
@@ -331,6 +399,10 @@
         if (!!it.reference !== wantRef) {
           undo.flags.push({ itemId: it.id, prev: !!it.reference });
           it.reference = wantRef;
+        }
+        if (MM.groupOf(it) !== r.group) {
+          undo.groups.push({ itemId: it.id, prev: MM.groupOf(it) });
+          MM.setGroup(m, it.id, r.group);
         }
       }
       itemOf.set(r.index, it.id);
@@ -399,6 +471,7 @@
       if (it) it.lastUpdated = prev;
     }
     for (const f of u.flags) MM.setReference(m, f.itemId, f.prev);
+    for (const g of u.groups || []) MM.setGroup(m, g.itemId, g.prev);
     for (const id of u.addedItems) if (MM.findItem(m, id)) MM.deleteItem(m, id);
     for (const ym of u.createdMonths) {
       const rec = m.records[ym];
@@ -604,6 +677,7 @@
     normalize,
     describe,
     categoryGuess,
+    groupGuess,
     monthlyDefaults,
     buildMonthlyPlan,
     countMonthlyWrites,

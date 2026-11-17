@@ -14,7 +14,7 @@
   const MM = MT.monthlyModel;
   const P = MT.paymentsModel;
   const store = MT.store;
-  const { h, btn, openSheet, confirmDialog, toast } = MT.ui;
+  const { h, btn, openSheet, confirmDialog, promptDialog, toast } = MT.ui;
   const { selectEl, segmented, ymPicker, field, errorLine } = MT.forms;
 
   const yen = (v) => `${U.yen(v)}円`;
@@ -220,11 +220,56 @@
           { value: 'reference', label: '参考行(合計に含めない)' },
           { value: 'skip', label: '取り込まない' },
         ];
+    // まとめ(証券会社など)の選択肢:推測したもの・今あるもの・「新しいまとめ」
+    const groupNames = [];
+    const addGroupName = (n) => {
+      if (n && !groupNames.includes(n)) groupNames.push(n);
+    };
+    if (!isCards) {
+      choices.rows.forEach((c) => addGroupName(c.group));
+      MM.groupNames(store.get().monthly).forEach(addGroupName);
+    }
+    const NEW_GROUP = '__new__';
+    const groupOptions = () => [{ value: '', label: 'まとめなし' }]
+      .concat(groupNames.map((n) => ({ value: n, label: `まとめ:${n}` })))
+      .concat([{ value: NEW_GROUP, label: '新しいまとめを作る…' }]);
+    const fillGroupSelect = (sel, value) => {
+      sel.replaceChildren(...groupOptions().map((o) => h('option', { value: o.value, text: o.label })));
+      sel.value = value;
+    };
+
     const rows = table.rows.map((r, i) => {
       const ch = choices.rows[i];
       const status = selectEl(statusOptions, ch.status, { class: 'field-select field-sm', 'aria-label': `${r.name}の扱い` });
       const cat = selectEl(catOptions, isCards ? ch.category : ch.categoryId, { class: 'field-select field-sm', 'aria-label': `${r.name}の${isCards ? 'カテゴリ' : '区分'}` });
       const target = isCards ? null : selectEl(targetOptions, ch.target, { class: 'field-select field-sm', 'aria-label': `${r.name}の反映先` });
+      const group = isCards ? null : h('select', { class: 'field-select field-sm', 'aria-label': `${r.name}のまとめ(証券会社など)` });
+      if (group) {
+        fillGroupSelect(group, ch.group || '');
+        group.addEventListener('change', async () => {
+          if (group.value !== NEW_GROUP) {
+            ch.group = group.value;
+            refresh();
+            return;
+          }
+          const name = await promptDialog({
+            title: '新しいまとめ',
+            label: 'まとめの名前',
+            placeholder: '例:証券A',
+            hint: '同じまとめの行は、月末記録の表でまとめの小計の下に内訳として並びます。',
+            okLabel: '決定',
+            maxLength: MM.NAME_MAX,
+          });
+          if (name) {
+            const n = name.replace(/\s+/g, ' ').trim().slice(0, MM.NAME_MAX);
+            addGroupName(n);
+            ch.group = n;
+          }
+          // 選択肢を全部の行で作り直す(キャンセルなら元の選択に戻る)
+          rows.forEach((v, j) => fillGroupSelect(v.group, choices.rows[j].group || ''));
+          refresh();
+        });
+      }
       const metaEl = h('span', { class: 'imp-row-meta' });
       const note = h('p', { class: 'form-hint' });
       status.addEventListener('change', () => {
@@ -248,13 +293,14 @@
         'li',
         { class: 'imp-row' },
         h('div', { class: 'imp-row-head' }, h('span', { class: 'imp-row-name', text: r.name }), metaEl),
-        h('div', { class: `imp-row-ctrl${isCards ? ' is-cards' : ''}` }, status, cat, target),
+        h('div', { class: `imp-row-ctrl${isCards ? ' is-cards' : ' has-group'}` }, status, cat, target, group),
         note
       );
-      return { li, status, cat, target, metaEl, note };
+      return { li, status, cat, target, group, metaEl, note };
     });
 
     const checksBox = h('ul', { class: 'imp-list' });
+    const doublesBox = h('div', { 'aria-live': 'polite' });
     const conflictTitle = h('h3', { class: 'form-section-title' });
     const conflictBox = h('div', { class: 'map-list' });
     const setAll = (mode) => () => {
@@ -292,7 +338,7 @@
           { class: 'form-hint' },
           isCards
             ? '名前に「合計」「総合計」「前月比」「月平均」を含む行は、最初は「取り込まない」にしています。カテゴリは行ごとに選べます(最初は変動費)。'
-            : '名前に「合計」「総資産」「前月比」「月平均」を含む行は「取り込まない」、合計の行より下の行と「含み益」は「参考行」にしています。参考行は記録しますが、小計・総資産には含めません。'
+            : '名前に「合計」「総資産」「前月比」「月平均」を含む行は「取り込まない」、合計の行より下の行と「含み益」は「参考行」にしています。参考行は記録しますが、小計・総資産には含めません。「証券A(国内株式)」のように括弧の前が同じ行は、同じ「まとめ」にしています(表でまとめの小計の下に内訳として並びます)。'
         ),
         h('ul', { class: 'imp-list' }, rows.map((r) => r.li)),
         table.issues.length ? h('ul', { class: 'report-list is-issue' }, table.issues.map((t) => h('li', { text: t }))) : null
@@ -302,6 +348,7 @@
         { class: 'form-section' },
         h('h3', { class: 'form-section-title', text: isCards ? '月ごとの合計(取り込む行だけで計算)' : '月ごとの区分小計と総資産(取り込む行だけで計算)' }),
         isCards && plan.refRows.length ? h('p', { class: 'form-hint', text: '「合計」を含む引き落とし口座別の行は、参照用に表示しています(取り込みません)。' }) : null,
+        doublesBox,
         checksBox
       ),
       conflictSec,
@@ -336,6 +383,8 @@
           v.cat.value = r.categoryId;
           v.target.disabled = skip;
           v.target.value = r.target;
+          v.group.disabled = r.status !== 'import';
+          v.group.value = r.group;
         }
         v.note.textContent = rowNote(r);
       });
@@ -356,13 +405,36 @@
     function rowNote(r) {
       if (r.status === 'skip') return '取り込みません。';
       if (isCards) return `支払いの明細「${r.name}」(${P.categoryLabel(r.category)})として入れます。`;
-      if (r.target === 'new') return `新しい項目「${r.name}」を${r.status === 'reference' ? '参考行として' : ''}追加します。`;
+      const inGroup = r.status === 'import' && r.group ? `まとめ「${r.group}」の内訳にします。` : '';
+      if (r.target === 'new') return `新しい項目「${r.name}」を${r.status === 'reference' ? '参考行として' : ''}追加します。${inGroup}`;
       const flag = r.flagChange ? (r.status === 'reference' ? 'この項目を参考行にします。' : 'この項目を小計・総資産に含めます。') : '';
-      return `今の項目「${r.item.name}」に書き込みます(区分はそのまま)。${flag}`;
+      const groupNote = r.groupChange ? (r.group ? `まとめを「${r.group}」にします。` : 'まとめから外します。') : '';
+      return `今の項目「${r.item.name}」に書き込みます(区分はそのまま)。${flag}${groupNote}`;
     }
 
     function drawChecks() {
       checksBox.replaceChildren();
+      // 二重に数えそうな項目(今の「証券A」と、取り込む内訳の「証券A(国内株式)」など)
+      const doubles = isCards ? [] : plan.doubles;
+      doublesBox.replaceChildren(
+        ...(doubles.length
+          ? [
+              h(
+                'div',
+                { class: 'notice notice-warn' },
+                h(
+                  'div',
+                  { class: 'notice-main' },
+                  h('p', { class: 'notice-title', text: '二重に数える項目があります' }),
+                  doubles.map((x) =>
+                    h('p', { class: 'notice-text', text: `今の項目「${x.name}」(${x.months.length}か月分に値あり)と、取り込むまとめ「${x.name}」の内訳は同じお金です。` })
+                  ),
+                  h('p', { class: 'notice-text', text: '取り込んだあと「項目を編集」で今の項目を削除すると、総資産が元の表と同じになります(下の総資産は、取り込む行だけで計算しています)。' })
+                )
+              ),
+            ]
+          : [])
+      );
       if (!plan.checks.length) {
         checksBox.append(h('li', { class: 'form-hint', text: '取り込む月がありません。' }));
         return;

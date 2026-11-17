@@ -913,9 +913,9 @@
       d.schemaVersion = 12;
       return d;
     });
-    // v13 → v14:開示・決算(気になる銘柄・見た開示・手で入れた決算発表予定日)。足すものは読み込み時に空で入る
-    MT.store.addMigration(13, (d) => {
-      d.schemaVersion = 14;
+    // v14 → v15:開示・決算(気になる銘柄・見た開示・手で入れた決算発表予定日)。足すものは読み込み時に空で入る
+    MT.store.addMigration(14, (d) => {
+      d.schemaVersion = 15;
       return d;
     });
   }
