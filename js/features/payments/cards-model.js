@@ -224,7 +224,7 @@
     t = fixSlashDate(t);
     t = t.replace(/^((?:\d{4}\/)?\d{1,2}\/\d{1,2})_+/, '$1 ');
     t = t.replace(/(\d)[.,]{2,}(\d{3})(?!\d)/g, '$1,$2'); // 「1,.958」
-    t = t.replace(/[\\¥￥]\s?(-?\d{1,3}(?:[.,]\d{3})+|-?\d+)(?!\s*円)/g, (m, n) => `${n.replace(/\./g, ',')}円`);
+    t = t.replace(/[\\¥￥]+\s?(-?\d{1,3}(?:[.,]\d{3})+|-?\d+)(?!\s*円)/g, (m, n) => `${n.replace(/\./g, ',')}円`);
     t = t.replace(/(\d{1,3})\.(\d{3})(?=\s*円)/g, '$1,$2');
     t = t.replace(/[▲△]\s?(\d)/g, '-$1');
     return t;
@@ -250,9 +250,12 @@
   const AMOUNT_RE = /(-?\d{1,3}(?:,\d{3})+|-?\d+)\s*円/;
   const TAIL_AMOUNT = /(?:^|\s)(-?\d{1,3}(?:[.,]\d{3})+|-?\d{2,})\s*$/; // 行の終わりの「円」の無い金額(表の形)
   const WEEKDAY = /^\s*\(\s*[月火水木金土日](?:曜日?)?\s*\)/;
-  const EDGE = /^[\s_:・|-]+|[\s_:・|-]+$/g;
+  const EDGE = /^[\s_:・|\\-]+|[\s_:・|\\-]+$/g;
+  // 「円」が別の文字に読まれた金額だけの行(「15.830 折」「10.198q』」):桁区切りのある数字か 3 けた以上の数字と、後ろに 2 文字まで
+  const LOOSE_AMOUNT = /^(-?\d{1,3}(?:[.,]\d{3})+|-?\d{3,})(.*)$/;
   const yenOf = (a) => Number(a[1].replace(/[.,]/g, ''));
-  const PAY = /[0-9\]|lI!]{0,2}\s*回払い?|(?:ボーナス)?一括払い?|分割払い|リボ払い/g; // 支払い方法(1回払い など。「1」の読み違いも)
+  // 支払い方法(1回払い・「1回」の印 など。「1」の読み違いも)
+  const PAY = /[0-9\]|lI!]{0,2}\s*回払い?|(?:^|\s)[0-9\]|lI!]{1,2}\s*回(?=\s|$)|(?:ボーナス)?一括払い?|分割払い|リボ払い/g;
   const LETTER = /[A-Za-z぀-ヿ㐀-鿿]/;
 
   /** 名前のつづきをつなぐ(日本語どうしは空白なしで) */
@@ -264,7 +267,9 @@
     const last = ns[ns.length - 1];
     return ns.length === 2 && last.length <= 4 ? joinText(ns[0], last) : last;
   };
-  const row = (e) => ({ date: e.date, merchant: text(e.merchant) || '(名前なし)', amount: e.amount });
+  const NAMELESS = '(名前なし)';
+  const nameless = (m) => !m || m === NAMELESS;
+  const row = (e) => ({ date: e.date, merchant: text(e.merchant) || NAMELESS, amount: e.amount });
 
   /** 1 行から、日付(行の先頭)・金額・お店の名前を取り出す。日付の形で日付として正しくない行は null(読み違い) */
   function fieldsOf(line, toDate) {
@@ -273,7 +278,12 @@
     if (d && !date) return null;
     const rest = d ? line.slice(d[0].length).replace(WEEKDAY, '') : line;
     // 金額は「円」つき。日付で始まる行(表の形)は、行の終わりの「円」の無い金額も
-    const a = rest.match(AMOUNT_RE) || (d ? rest.match(TAIL_AMOUNT) : null);
+    let a = rest.match(AMOUNT_RE) || (d ? rest.match(TAIL_AMOUNT) : null);
+    if (!a && !d) {
+      const m = rest.match(LOOSE_AMOUNT);
+      const junk = m ? m[2].replace(/[\s\p{P}\p{S}]/gu, '') : '';
+      if (m && junk.length <= 2 && !/[\d年月日件回時分秒%]/.test(junk)) a = { 1: m[1], index: 0, 0: m[0] };
+    }
     // 支払い方法(1回払い など)と、表の利用者の列(本人・家族)はお店の名前に入れない
     const tidy = (s) =>
       s
@@ -421,6 +431,12 @@
       readGroups(groups.map(fields), out);
     }
     if (!out.length) readLines(fields(lines.filter(Boolean)), out);
+    // 先頭・最後の行に名前が無く、ほかのほとんどの行に名前があるときは、上下で切れた行とみなして除く
+    const named = out.filter((r) => !nameless(r.merchant)).length;
+    if (named * 2 >= out.length) {
+      if (out.length && nameless(out[out.length - 1].merchant)) out.pop();
+      if (out.length && nameless(out[0].merchant)) out.shift();
+    }
     return out.filter((r) => Number.isSafeInteger(r.amount) && r.amount !== 0);
   }
 
@@ -488,18 +504,28 @@
    * 何枚かのスクリーンショットを続けて読んだとき、前の 1 枚と重なって写っている行(次の 1 枚の先頭)を除く。
    * 次の 1 枚の先頭から、前の 1 枚にもある行(日付・金額が同じで、名前が似ている)が続くところまでを重なりとみなす
    * (読み取りで 1 行抜けても続けて見る。前の 1 枚に無い行が 2 つ続いたら、そこで重なりは終わり)。
-   * 重なりの中でも、前の 1 枚で読み落とした行は残す。1 枚の中の同じ行(本当の二重請求かもしれない)は除かない。最後に日付の順に並べる
+   * 重なりの中でも、前の 1 枚で読み落とした行は残す。1 枚の中の同じ行(本当の二重請求かもしれない)は除かない。
+   * 前の 1 枚の行とは 1 対 1 で重ねる(同じ行が 2 つ続くところで重なっても、1 つは残す)。名前が読めなかった行は日付と金額で重ねる。最後に日付の順に並べる
    */
   function joinPages(pages) {
     const out = [];
     let prev = [];
     for (const rows of pages) {
-      const inPrev = (r) => prev.some((t) => t.date === r.date && t.amount === r.amount && similar(t.merchant, r.merchant) >= SIMILAR);
+      const used = new Set();
+      const findPrev = (r) => {
+        for (let i = prev.length - 1; i >= 0; i--) {
+          const t = prev[i];
+          if (!used.has(i) && t.date === r.date && t.amount === r.amount && (nameless(t.merchant) || nameless(r.merchant) || similar(t.merchant, r.merchant) >= SIMILAR)) return i;
+        }
+        return -1;
+      };
       let start = 0;
       let misses = 0;
       const dup = new Set();
       for (let j = 0; j < rows.length && prev.length; j++) {
-        if (inPrev(rows[j])) {
+        const k = findPrev(rows[j]);
+        if (k >= 0) {
+          used.add(k);
           dup.add(j);
           start = j + 1;
           misses = 0;
