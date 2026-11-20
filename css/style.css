@@ -4410,3 +4410,196 @@ s.was {
     grid-row: 2;
   }
 }
+
+/* ---------------------------------------------------------------
+   カードを使った記録・カードの明細(js/features/payments/cards-view.js)
+   --------------------------------------------------------------- */
+.fab {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 14px);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 0 18px 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: var(--shadow-pop);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.fab .icon {
+  width: 20px;
+  height: 20px;
+}
+.fab.fab-mini {
+  width: 48px;
+  padding: 0;
+  justify-content: center;
+}
+.fab-mini .fab-plus {
+  position: absolute;
+  top: 4px;
+  right: 7px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+body.has-fab .view {
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 84px);
+}
+.place-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.link-btn {
+  margin-left: 8px;
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.card-pick {
+  margin: 0 0 10px;
+}
+.month-pick {
+  margin: 0 0 10px;
+}
+.card-check {
+  flex-wrap: wrap;
+}
+.card-check .check-actions,
+.card-check .check-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0 16px 12px;
+}
+.card-check .check-memo {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.card-check .check-help {
+  margin: 0;
+  padding: 0 16px 12px;
+  font-size: 13px;
+  color: var(--negative);
+}
+.pay-row.card-check.is-pending {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.pay-row.card-check.is-ok {
+  box-shadow: inset 3px 0 0 var(--positive);
+}
+.pay-row.card-check.is-ng {
+  box-shadow: inset 3px 0 0 var(--danger);
+  background: var(--negative-soft);
+}
+.paste-preview {
+  overflow-x: auto;
+}
+.paste-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.paste-table th,
+.paste-table td {
+  padding: 4px 3px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: middle;
+}
+.paste-table th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.paste-table td.num {
+  text-align: right;
+}
+.cell-input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+.cell-date {
+  width: 9.5em;
+}
+.cell-amount {
+  width: 6.5em;
+  text-align: right;
+}
+.paste-more summary {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--accent-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+.paste-more .field-textarea {
+  width: 100%;
+}
+.check-list {
+  display: grid;
+  gap: 2px;
+}
+.check-list .check {
+  margin-top: 6px;
+}
+.known-card > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.known-card > summary::-webkit-details-marker {
+  display: none;
+}
+.tone-pos .stat-value {
+  color: var(--positive);
+}
+.tone-neg .stat-value {
+  color: var(--negative);
+}
+.prow-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.prow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7.5em auto;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.prow .cell-merchant {
+  grid-column: 1 / -1;
+}
+.prow .cell-date,
+.prow .cell-amount {
+  width: 100%;
+}
+.prow .cell-amount {
+  text-align: right;
+}

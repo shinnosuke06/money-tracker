@@ -48,6 +48,7 @@
 
       priceSettingsCard(d),
       irSettingsCard(),
+      MT.cardUI ? MT.cardUI.settingsCard() : null,
 
       h(
         'section',
