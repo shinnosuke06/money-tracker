@@ -212,12 +212,10 @@
   // 明細の文字を読む(スクリーンショットの読み取り・貼り付け)
   // ---------------------------------------------------------------
 
-  /** 読み取りの崩れを直す:日本語のあいだの空白、¥ の読み違い(\)、桁区切りの「.」、「/」の読み違い */
+  /** 読み取りの崩れを直す:全角の英数字、日本語のあいだの空白、¥ の読み違い(\)、桁区切りの「.」、「/」の読み違い */
   function cleanLine(line) {
     let t = String(line)
-      .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
-      .replace(/[，]/g, ',')
-      .replace(/[／]/g, '/')
+      .normalize('NFKC')
       .replace(/\s+/g, ' ')
       .trim();
     for (let i = 0; i < 3; i++) t = t.replace(/([^\x00-\x7f]) (?=[^\x00-\x7f])/g, '$1');
@@ -235,60 +233,239 @@
     return t;
   }
 
-  const SKIP = /合計|ご請求|請求額|お支払い金額|お支払金額|ご利用可能|利用可能額|残高|ポイント|ご利用日|お支払い分/;
-  const DATE_RE = /(?:(\d{4})[年\/.\-])?(\d{1,2})[月\/.\-](\d{1,2})日?/;
+  // 明細の行ではないもの(見出し・合計・残高など)。日付で始まる行は、お店の名前に入っていても飛ばさない
+  const SKIP = /合計|小計|ご請求|請求額|お支払い金額|お支払金額|ご利用可能|利用可能額|残高|ポイント|ご利用日|ご利用分|お支払い分|明細/;
+  const COLUMNS = /(?:日付|金額|店名|利用先|利用日).*(?:日付|金額|店名|利用先|利用日)/; // 列の見出し・検索の欄
+  const TOTAL = /小計|合計|ご請求(?:金)?額|お支払い?(?:金)?額/;
+  // 行の先頭の日付:10/03、10月3日、2026/10/03、2026年10月3日、26.10.03(年が 2 けた)。後ろに数字や「,」が続くもの(金額)は日付にしない
+  const DATE_RE = /^(?:(\d{4}|\d{2})[年/.-] ?)?(\d{1,2})[月/.-] ?(\d{1,2})日?(?![\d,])/;
   const AMOUNT_RE = /(-?\d{1,3}(?:,\d{3})+|-?\d+)\s*円/;
+  const PAY = /[0-9\]|lI!]{0,2}\s*回払い?|(?:ボーナス)?一括払い?|分割払い|リボ払い/g; // 支払い方法(1回払い など。「1」の読み違いも)
+  const LETTER = /[A-Za-z぀-ヿ㐀-鿿]/;
+
+  /** 名前のつづきをつなぐ(日本語どうしは空白なしで) */
+  const joinText = (a, b) => (!a ? b : !b ? a : /[^\x00-\x7f]$/.test(a) && /^[^\x00-\x7f]/.test(b) ? a + b : `${a} ${b}`);
+  /** 金額の行の前に、お店の名前だけの行があるとき:最後の 1 行(短ければ、折り返しとみなして前の行とつなぐ) */
+  const lead = (names) => {
+    const ns = names.filter((n) => n.length >= 2 && LETTER.test(n)).slice(-2);
+    if (!ns.length) return '';
+    const last = ns[ns.length - 1];
+    return ns.length === 2 && last.length <= 4 ? joinText(ns[0], last) : last;
+  };
+  const row = (e) => ({ date: e.date, merchant: text(e.merchant) || '(名前なし)', amount: e.amount });
+
+  /** 1 行から、日付(行の先頭)・金額・お店の名前を取り出す。日付の形で日付として正しくない行は null(読み違い) */
+  function fieldsOf(line, toDate) {
+    const d = line.match(DATE_RE);
+    const date = d ? toDate(d[1], d[2], d[3]) : null;
+    if (d && !date) return null;
+    const rest = d ? line.slice(d[0].length) : line;
+    const a = rest.match(AMOUNT_RE);
+    const tidy = (s) =>
+      s
+        .replace(PAY, ' ')
+        .replace(/^[\s_:・|-]+|[\s_:・|-]+$/g, '')
+        .replace(/\s+/g, ' ');
+    const before = tidy(a ? rest.slice(0, a.index) : rest);
+    const after = a ? tidy(rest.slice(a.index + a[0].length)) : '';
+    return {
+      date,
+      amount: a ? Number(a[1].replace(/,/g, '')) : null,
+      // 金額の後ろの 1〜2 文字は、矢印などの記号の読み違い
+      merchant: joinText(before, after.length >= 3 ? after : ''),
+      skip: !d && (SKIP.test(line) || COLUMNS.test(line)),
+    };
+  }
+
+  /** 日付が先に来る形:日付の行から次の日付の行までを 1 件にする(1 行にまとまった形も) */
+  function readDateFirst(fs, out) {
+    let cur = null;
+    const push = () => {
+      if (cur && cur.date && cur.amount != null) out.push(row(cur));
+      cur = null;
+    };
+    for (const f of fs) {
+      if (f.skip) continue;
+      if (f.date) {
+        push();
+        cur = { date: f.date, merchant: f.merchant, amount: f.amount };
+        if (cur.amount != null && cur.merchant) push();
+        continue;
+      }
+      if (!cur) continue;
+      if (f.amount != null && cur.amount == null) {
+        cur.amount = f.amount;
+        if (f.merchant && !cur.merchant) cur.merchant = f.merchant;
+      } else if (!cur.merchant && f.merchant) cur.merchant = f.merchant;
+      if (cur.amount != null && cur.merchant) push();
+    }
+    push();
+  }
+
+  /** 日付が後に来る形:お店・金額の行(名前の折り返しが続くことも)の後の、日付の行で 1 件にする */
+  function readDateLast(fs, out) {
+    let cur = null;
+    let names = [];
+    for (const f of fs) {
+      if (f.skip) {
+        cur = null;
+        names = [];
+      } else if (f.amount != null) {
+        cur = { date: f.date, amount: f.amount, merchant: f.merchant || lead(names), more: 0 };
+        names = [];
+        if (cur.date) {
+          out.push(row(cur));
+          cur = null;
+        }
+      } else if (f.date) {
+        if (cur) out.push(row({ ...cur, date: f.date }));
+        cur = null;
+        names = [];
+      } else if (f.merchant && cur && cur.more < 2) {
+        cur.merchant = joinText(cur.merchant, f.merchant);
+        cur.more++;
+      } else if (f.merchant && !cur) names = [...names, f.merchant].slice(-2);
+    }
+  }
+
+  /** 行を順に読む。日付と金額のどちらが先に出てくるかで、形を決める */
+  function readLines(fs, out) {
+    const first = fs.find((f) => !f.skip && (f.date || f.amount != null));
+    (first && first.amount != null && !first.date ? readDateLast : readDateFirst)(fs, out);
+  }
 
   /**
-   * 明細の文字を、行(日付・お店・金額)にする。日付と金額の形を手がかりに、1 行にまとまっていても、別の行に分かれていても読む。
-   * 年の無い日付は、お支払いの月(payMonth)より後にならない年にする
+   * 空行で分かれたまとまり(スクリーンショットでは、明細の 1 件ごと)を読む。
+   * 金額が 1 つのまとまりは、日付が前でも後でも 1 件にする。合計・小計のまとまりは除く。
+   * 日付の無い件は、ほとんどの件に日付が無い形(日付が見出しになっている形)のときだけ、前の日付を使う。
+   * それ以外(上下で切れて日付が写っていない行)は除く
+   */
+  function readGroups(groups, out) {
+    const items = [];
+    let lastDate = null;
+    for (const fs of groups) {
+      const amounts = fs.filter((f) => !f.skip && f.amount != null);
+      const dates = fs.filter((f) => f.date);
+      if (amounts.length > 1 || dates.length > 1) {
+        const sub = [];
+        readLines(fs, sub);
+        sub.forEach((r) => items.push(r));
+        if (sub.length) lastDate = sub[sub.length - 1].date;
+        continue;
+      }
+      const d = dates[0] || null;
+      const a = amounts[0];
+      if (!a) {
+        if (d) lastDate = d.date;
+        continue;
+      }
+      const ai = fs.indexOf(a);
+      if (fs.some((f, i) => f.skip && i > ai)) continue; // 合計・小計
+      const plain = (f) => !f.skip && !f.date && f.amount == null && f.merchant;
+      let merchant = a.merchant || (d && d.merchant) || lead(fs.slice(0, ai).filter(plain).map((f) => f.merchant));
+      fs.slice(ai + 1)
+        .filter(plain)
+        .slice(0, 2)
+        .forEach((f) => (merchant = joinText(merchant, f.merchant)));
+      items.push({ date: a.date || (d && d.date) || null, amount: a.amount, merchant, fallback: lastDate });
+      if (items[items.length - 1].date) lastDate = items[items.length - 1].date;
+    }
+    const dated = items.filter((e) => e.date).length;
+    const headed = items.length - dated > dated;
+    for (const e of items) {
+      const date = e.date || (headed ? e.fallback : null);
+      if (date) out.push(row({ ...e, date }));
+    }
+  }
+
+  /**
+   * 明細の文字を、行(日付・お店・金額)にする。日付と金額の形を手がかりに、1 行にまとまっていても、別の行に分かれていても、
+   * 日付が前でも後でも読む。空行があれば、空行で分かれたまとまりごとに読む(スクリーンショットの読み取りは、1 件ごとに空行を入れる)。
+   * 年の無い日付は、お支払いの月(payMonth)より後にならない年にする。年が 2 けたなら 2000 年代
    */
   function parseText(textIn, { payMonth } = {}) {
     const [py, pm] = U.isYM(payMonth) ? payMonth.split('-').map(Number) : [new Date().getFullYear(), new Date().getMonth() + 1];
     const toDate = (y, m, d) => {
-      let year = y ? Number(y) : py;
+      let year = y ? Number(y) + (y.length === 2 ? 2000 : 0) : py;
       if (!y && Number(m) > pm) year = py - 1; // お支払いの月より後の月は、前の年の利用
       const s = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       return U.isDateStr(s) ? s : null;
     };
     const lines = String(textIn || '')
       .split(/\r?\n/)
-      .map(cleanLine)
-      .filter(Boolean);
+      .map(cleanLine);
+    const fields = (ls) => ls.map((l) => fieldsOf(l, toDate)).filter(Boolean);
     const out = [];
-    let cur = null;
-    const push = () => {
-      if (cur && cur.date && cur.amount != null) out.push({ date: cur.date, merchant: text(cur.merchant) || '(名前なし)', amount: cur.amount });
-      cur = null;
-    };
-    for (const line of lines) {
-      const d = line.match(DATE_RE);
-      const a = line.match(AMOUNT_RE);
-      if (SKIP.test(line) && !(d && d.index === 0)) continue;
-      if (d && d.index === 0) {
-        push();
-        const date = toDate(d[1], d[2], d[3]);
-        if (!date) continue;
-        cur = { date, merchant: '', amount: null };
-        let rest = line.slice(d[0].length);
-        if (a) {
-          cur.amount = Number(a[1].replace(/,/g, ''));
-          rest = rest.replace(a[0], '');
-        }
-        cur.merchant = rest.replace(/^[\s_:・-]+/, '').trim();
-        if (cur.amount != null && cur.merchant) push();
-        continue;
+    if (lines.some((l) => !l)) {
+      const groups = [[]];
+      for (const l of lines) {
+        if (l) groups[groups.length - 1].push(l);
+        else if (groups[groups.length - 1].length) groups.push([]);
       }
-      if (!cur) continue;
-      if (a && cur.amount == null) {
-        cur.amount = Number(a[1].replace(/,/g, ''));
-        const rest = line.replace(a[0], '').trim();
-        if (rest && !cur.merchant) cur.merchant = rest;
-      } else if (!cur.merchant) cur.merchant = line;
-      if (cur.amount != null && cur.merchant) push();
+      readGroups(groups.map(fields), out);
     }
-    push();
+    if (!out.length) readLines(fields(lines.filter(Boolean)), out);
     return out.filter((r) => Number.isSafeInteger(r.amount) && r.amount !== 0);
+  }
+
+  /**
+   * スクリーンショットの読み取り結果の行(文字と位置)を、上から順の文字にする。
+   * 同じ高さに並んだ行(左のお店と右の金額が別に読まれたもの)は 1 行にし、
+   * 行のあきが大きいところ(ふつうの行の高さの 1.5 倍より広いところ = 明細の 1 件の区切り)に空行を入れる
+   */
+  function layoutText(lines) {
+    const ls = (Array.isArray(lines) ? lines : [])
+      .filter((l) => l && l.bbox && String(l.text || '').trim())
+      .map((l) => ({ text: String(l.text).trim(), x0: l.bbox.x0, y0: l.bbox.y0, y1: l.bbox.y1, cy: (l.bbox.y0 + l.bbox.y1) / 2 }))
+      .sort((a, b) => a.cy - b.cy);
+    const rows = [];
+    for (const l of ls) {
+      const r = rows[rows.length - 1];
+      if (r && l.cy >= r.y0 && l.cy <= r.y1) {
+        r.parts.push(l);
+        r.y0 = Math.min(r.y0, l.y0);
+        r.y1 = Math.max(r.y1, l.y1);
+      } else rows.push({ parts: [l], y0: l.y0, y1: l.y1 });
+    }
+    if (!rows.length) return '';
+    const heights = rows.map((r) => r.y1 - r.y0).sort((a, b) => a - b);
+    const wide = heights[Math.floor(heights.length / 2)] * 1.5;
+    const out = [];
+    rows.forEach((r, i) => {
+      if (i && r.y0 - rows[i - 1].y1 > wide) out.push('');
+      out.push(
+        r.parts
+          .sort((a, b) => a.x0 - b.x0)
+          .map((p) => p.text)
+          .join(' ')
+      );
+    });
+    return out.join('\n');
+  }
+
+  /**
+   * 明細に書かれた合計(合計・小計・ご請求金額・お支払い金額)を見つける。読み取った行の合計と比べて、読み落としに気づくため。
+   * 金額がその行に無ければ、次の行(金額だけの行)か前の行から。いくつかあれば一番大きいもの。無ければ null
+   */
+  function findTotal(textIn) {
+    const ls = String(textIn || '')
+      .split(/\r?\n/)
+      .map(cleanLine);
+    const amountOf = (l) => {
+      if (!l || DATE_RE.test(l)) return null;
+      const a = l.match(AMOUNT_RE);
+      return a ? Number(a[1].replace(/,/g, '')) : null;
+    };
+    let best = null;
+    ls.forEach((l, i) => {
+      if (!TOTAL.test(l) || DATE_RE.test(l)) return;
+      let v = amountOf(l);
+      const next = ls[i + 1];
+      if (v == null && next && !next.replace(AMOUNT_RE, '').trim()) v = amountOf(next);
+      if (v == null) v = amountOf(ls[i - 1]);
+      if (v != null && (best == null || v > best)) best = v;
+    });
+    return best;
   }
 
   /**
@@ -445,6 +622,8 @@
     setCards,
     cleanLine,
     parseText,
+    layoutText,
+    findTotal,
     joinPages,
     similar,
     judgeCard,

@@ -471,8 +471,10 @@
       const pages = [];
       for (let i = 0; i < files.length; i++) {
         onStatus(`読み取り中…(${i + 1}/${files.length}枚目)`);
-        const { data } = await worker.recognize(files[i]);
-        pages.push(data.text || '');
+        const { data } = await worker.recognize(files[i], {}, { text: true, blocks: true });
+        // 行の位置から、明細の 1 件ごとに空行を入れる(位置が取れないときは、読んだ文字のまま)
+        const lines = Array.isArray(data.lines) && data.lines.length ? data.lines : (data.blocks || []).flatMap((b) => (b.paragraphs || []).flatMap((pa) => pa.lines || []));
+        pages.push(C.layoutText(lines) || data.text || '');
       }
       return pages;
     } finally {
@@ -491,6 +493,7 @@
     const s = openSheet({ title: '明細を入れる', description: `${cardName(p, cardId)}`, className: 'sheet-form sheet-statement' });
     const err = MT.forms.errorLine();
     let rows = [];
+    let stated = null; // 明細に書かれた合計(小計・合計など。見つからなければ null)
     let curCard = cardId;
     const card = C.cards(p).length > 1 ? cardPicker(p, cardId, (v) => (curCard = v)) : null;
     const monthSel = MT.forms.selectEl(monthOptions(p), month, { 'aria-label': 'お支払いの月' });
@@ -505,8 +508,19 @@
         return;
       }
       const total = rows.reduce((t, r) => t + (r.amount || 0), 0);
-      table.replaceChildren(
+      const diff = stated == null ? null : total - stated;
+      table.replaceChildren();
+      add(
+        table,
         h('p', { class: 'form-hint', text: `${rows.length}件・合計 ${yen(total)}。違うところは、その場で直せます(お店の名前の読み違いなど)。` }),
+        diff == null
+          ? null
+          : h('p', {
+              class: `form-hint statement-total ${diff ? 'tone-neg' : 'tone-pos'}`,
+              text: diff
+                ? `明細に書かれた合計は ${yen(stated)} で、${yen(Math.abs(diff))} ${diff > 0 ? '多く' : '少なく'}読んでいます。読めていない行や、金額の読み違いがないか確かめてください。`
+                : `明細に書かれた合計(${yen(stated)})と同じです。`,
+            }),
         h(
           'ul',
           { class: 'prow-list' },
@@ -551,6 +565,8 @@
       const pm = monthSel.value;
       const pages = texts.map((t) => C.parseText(t, { payMonth: pm }));
       rows = C.joinPages(pages).map((r) => ({ ...r }));
+      const totals = texts.map((t) => C.findTotal(t)).filter((v) => v != null);
+      stated = totals.length ? Math.max(...totals) : null;
       drawTable();
       return rows.length;
     };
