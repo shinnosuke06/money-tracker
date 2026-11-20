@@ -13,6 +13,13 @@
       src: 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js',
       integrity: 'sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ',
     },
+    // カードの明細のスクリーンショットを、スマホの中で読み取る(js/features/payments/cards-view.js)。
+    // 本体のほかに、読み取りの部品(tesseract.js-core)と日本語のデータ(@tesseract.js-data/jpn)を、版を固定して jsDelivr から受け取る
+    tesseract: {
+      global: 'Tesseract',
+      src: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+      integrity: 'sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F',
+    },
     // 旧・ポケカ管理アプリのバックアップ("LZ:" で始まるもの)の展開に使う
     lzstring: {
       global: 'LZString',

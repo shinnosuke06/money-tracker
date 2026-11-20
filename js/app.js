@@ -50,6 +50,8 @@
     currentView = view;
     currentPath = path;
     updateTabbar(view.tab || path.split('/')[0]);
+    // 右下の「カードを使った」(支払いの画面は文字つき、ほかの画面は小さい丸)
+    if (MT.cardUI) MT.cardUI.updateFab(path);
     if (resetScroll || changed) root.scrollTo(0, 0);
   }
 

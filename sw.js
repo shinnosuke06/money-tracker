@@ -12,11 +12,11 @@
  * - それ以外(価格取得の URL・為替・新しい版の確認 ?check=)は何もしない(そのままネットへ。キャッシュしない)
  * データ(localStorage)には触らない。
  */
-const VERSION = '2026.11.17-2';
+const VERSION = '2026.11.20-1';
 const CACHE = `money-tracker-${VERSION}`;
 const LIBS = 'money-tracker-libs-v1';
 const LIB_HOST = 'cdn.jsdelivr.net';
-const PINNED_LIBS = /^\/npm\/(chart\.js|lz-string)@\d/; // 版を固定した部品だけ
+const PINNED_LIBS = /^\/npm\/(chart\.js|lz-string|tesseract\.js|tesseract\.js-core|@tesseract\.js-data\/jpn)@\d/; // 版を固定した部品だけ(読み取りのしくみも)
 const STATIC = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-32.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 
 /** index.html に書いてあるスクリプトとスタイルの場所(同じ場所のものだけ) */

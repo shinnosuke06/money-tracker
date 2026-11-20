@@ -20,6 +20,7 @@
     { path: 'payments', label: '概要' },
     { path: 'payments/bills', label: '支払い' },
     { path: 'payments/income', label: '入金・振り分け' },
+    { path: 'payments/cards', label: 'カードの明細' },
     { path: 'payments/history', label: '履歴' },
   ];
 
@@ -48,7 +49,11 @@
       h(
         'nav',
         { class: 'subnav', 'aria-label': '支払いのメニュー' },
-        SUBNAV.map((s) => h('a', { class: 'subnav-item', href: `#/${s.path}`, 'aria-current': s.path === active ? 'page' : null, text: s.label }))
+        SUBNAV.map((s) => {
+          // カードの明細:まだ確かめていないものがあれば赤
+          const alert = s.path === 'payments/cards' && MT.cardUI && MT.cardUI.pendingCount() > 0;
+          return h('a', { class: `subnav-item${alert ? ' is-alert is-red' : ''}`, href: `#/${s.path}`, 'aria-current': s.path === active ? 'page' : null, text: s.label });
+        })
       )
     );
   }
@@ -125,6 +130,8 @@
     head(container, 'payments');
 
     if (p.notice) container.append(rolloverNotice(p.notice));
+    const cardNotice = MT.cardUI ? MT.cardUI.overviewNotice() : null;
+    if (cardNotice) container.append(cardNotice);
     if (!p.bills.length && !p.incomes.length) container.append(welcomeCard(p));
     if (!p.accounts.length) {
       container.append(
@@ -1063,7 +1070,8 @@
   }
 
   MT.views = MT.views || {};
-  MT.views.payments = { render: renderOverview, needsAttention };
+  MT.views.payments = { render: renderOverview, needsAttention, tabBadge: () => (MT.cardUI ? MT.cardUI.tabBadge() : null) };
+  MT.paymentsView = { head };
   MT.views['payments/bills'] = { render: renderBills, tab: 'payments' };
   MT.views['payments/income'] = { render: renderIncome, tab: 'payments' };
   MT.views['payments/history'] = { render: renderHistory, tab: 'payments', unmount: () => MT.paymentsChart.destroy() };

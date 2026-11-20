@@ -92,4 +92,9 @@ test('sw.js は版を固定した部品(Chart.js・lz-string)だけをとって�
   assert.ok(re.test('/npm/chart.js@4.5.1/dist/chart.umd.min.js'));
   assert.ok(re.test('/npm/lz-string@1.5.0/libs/lz-string.min.js'));
   assert.equal(re.test('/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.min.json'), false);
+  // カードの明細の読み取りのしくみ(版を固定したもの)もとっておく(2 回目からは受け取らない)
+  assert.ok(re.test('/npm/tesseract.js@5.1.1/dist/worker.min.js'));
+  assert.ok(re.test('/npm/tesseract.js-core@5.1.1/tesseract-core-simd-lstm.wasm.js'));
+  assert.ok(re.test('/npm/@tesseract.js-data/jpn@1.0.0/4.0.0_best_int/jpn.traineddata.gz'));
+  assert.equal(re.test('/npm/tesseract.js@latest/dist/worker.min.js'), false);
 });

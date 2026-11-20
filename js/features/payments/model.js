@@ -19,6 +19,8 @@
  *       // 振り分け。auto のときは毎回計算し直す。手で直すと manual になる
  *   history: [{ month, income, payment, balance, catTotals, details, incomeDetails }],
  *       // income と balance は null(未入力)のことがある(Excel のカード推移から作った月など)
+ *   cardCheck: { cardIds, defaultCardId, places, records, statements, known },
+ *       // カードを使った記録と、カードの明細の確認(js/features/payments/cards-model.js)
  *   notice: { type: "rollover", month } | null,   // 月替わりの案内
  *   memo: ""
  * }
@@ -66,6 +68,7 @@
       specials: [],
       allocation: { mode: 'auto', items: [] },
       history: [],
+      cardCheck: MT.cardCheck ? MT.cardCheck.create() : { cardIds: [], defaultCardId: null, places: [], records: [], statements: [], known: [] },
       notice: null,
       memo: '',
     };
@@ -204,6 +207,7 @@
     p.history = [...hist.values()].sort((a, b) => (a.month < b.month ? -1 : 1));
     p.notice = raw.notice && raw.notice.type === 'rollover' && U.isYM(raw.notice.month) ? { type: 'rollover', month: raw.notice.month } : null;
     p.memo = cleanMemo(raw.memo);
+    if (MT.cardCheck) p.cardCheck = MT.cardCheck.normalize(raw.cardCheck);
     return p;
   }
 
@@ -826,6 +830,11 @@
     // 足すものは無い(古い版のアプリが記録を消さないよう、版だけ上げる)
     MT.store.addMigration(12, (d) => {
       d.schemaVersion = 13;
+      return d;
+    });
+    // v15 → v16:カードを使った記録と、カードの明細の確認(payments.cardCheck)。足すものは読み込み時に空で入る
+    MT.store.addMigration(15, (d) => {
+      d.schemaVersion = 16;
       return d;
     });
   }
