@@ -220,17 +220,25 @@
       .trim();
     for (let i = 0; i < 3; i++) t = t.replace(/([^\x00-\x7f]) (?=[^\x00-\x7f])/g, '$1');
     t = t.replace(/(\d{4}) ?年 ?(\d{1,2}) ?月 ?(\d{1,2}) ?日/g, '$1年$2月$3日');
-    // 「10/03」の「/」が数字に読まれて「10703」「104712」のようになったとき(5〜6 けたで始まる行)
-    t = t.replace(/^(\d{5,6})(?=[_\s]|$)/, (m) => {
-      const mo = Number(m.slice(0, 2));
-      const da = Number(m.slice(-2));
-      return mo >= 1 && mo <= 12 && da >= 1 && da <= 31 ? `${m.slice(0, 2)}/${m.slice(-2)}` : m;
-    });
-    t = t.replace(/^(\d{1,2}\/\d{1,2})_+/, '$1 ');
+    t = t.replace(/(^|[^\d])(\d{1,2}) ?月 ?(\d{1,2}) ?日/g, '$1$2月$3日');
+    t = fixSlashDate(t);
+    t = t.replace(/^((?:\d{4}\/)?\d{1,2}\/\d{1,2})_+/, '$1 ');
+    t = t.replace(/(\d)[.,]{2,}(\d{3})(?!\d)/g, '$1,$2'); // 「1,.958」
     t = t.replace(/[\\¥￥]\s?(-?\d{1,3}(?:[.,]\d{3})+|-?\d+)(?!\s*円)/g, (m, n) => `${n.replace(/\./g, ',')}円`);
     t = t.replace(/(\d{1,3})\.(\d{3})(?=\s*円)/g, '$1,$2');
     t = t.replace(/[▲△]\s?(\d)/g, '-$1');
     return t;
+  }
+
+  /**
+   * 行の先頭の日付で、「/」が「7」「4」「/7」などに読まれたものを直す(「10703」「104712」「2026/710703」「2026710710」)。
+   * 月・日は 2 けたのときだけ。後ろに「円」が続くもの(金額)は直さない
+   */
+  function fixSlashDate(t) {
+    const m = t.match(/^(\d{4}[/7]?)?([\d/]{4,8})(?=[\s_(]|$)/);
+    if (!m || /^(?:\d{4}\/)?\d{1,2}\/\d{1,2}$/.test(m[0]) || /^\s*円/.test(t.slice(m[0].length))) return t;
+    const r = m[2].match(m[1] ? /^[/47]{0,2}(0[1-9]|1[0-2])[/47]{0,2}([0-2]\d|3[01])$/ : /^[/47]{0,2}(0[1-9]|1[0-2])[/47]{1,2}([0-2]\d|3[01])$/);
+    return r ? `${m[1] ? `${m[1].slice(0, 4)}/` : ''}${r[1]}/${r[2]}${t.slice(m[0].length)}` : t;
   }
 
   // 明細の行ではないもの(見出し・合計・残高など)。日付で始まる行は、お店の名前に入っていても飛ばさない
@@ -240,6 +248,10 @@
   // 行の先頭の日付:10/03、10月3日、2026/10/03、2026年10月3日、26.10.03(年が 2 けた)。後ろに数字や「,」が続くもの(金額)は日付にしない
   const DATE_RE = /^(?:(\d{4}|\d{2})[年/.-] ?)?(\d{1,2})[月/.-] ?(\d{1,2})日?(?![\d,])/;
   const AMOUNT_RE = /(-?\d{1,3}(?:,\d{3})+|-?\d+)\s*円/;
+  const TAIL_AMOUNT = /(?:^|\s)(-?\d{1,3}(?:[.,]\d{3})+|-?\d{2,})\s*$/; // 行の終わりの「円」の無い金額(表の形)
+  const WEEKDAY = /^\s*\(\s*[月火水木金土日](?:曜日?)?\s*\)/;
+  const EDGE = /^[\s_:・|-]+|[\s_:・|-]+$/g;
+  const yenOf = (a) => Number(a[1].replace(/[.,]/g, ''));
   const PAY = /[0-9\]|lI!]{0,2}\s*回払い?|(?:ボーナス)?一括払い?|分割払い|リボ払い/g; // 支払い方法(1回払い など。「1」の読み違いも)
   const LETTER = /[A-Za-z぀-ヿ㐀-鿿]/;
 
@@ -259,18 +271,22 @@
     const d = line.match(DATE_RE);
     const date = d ? toDate(d[1], d[2], d[3]) : null;
     if (d && !date) return null;
-    const rest = d ? line.slice(d[0].length) : line;
-    const a = rest.match(AMOUNT_RE);
+    const rest = d ? line.slice(d[0].length).replace(WEEKDAY, '') : line;
+    // 金額は「円」つき。日付で始まる行(表の形)は、行の終わりの「円」の無い金額も
+    const a = rest.match(AMOUNT_RE) || (d ? rest.match(TAIL_AMOUNT) : null);
+    // 支払い方法(1回払い など)と、表の利用者の列(本人・家族)はお店の名前に入れない
     const tidy = (s) =>
       s
         .replace(PAY, ' ')
-        .replace(/^[\s_:・|-]+|[\s_:・|-]+$/g, '')
+        .replace(EDGE, '')
+        .replace(/\s*(?:本人|家族)$/, '')
+        .replace(EDGE, '')
         .replace(/\s+/g, ' ');
     const before = tidy(a ? rest.slice(0, a.index) : rest);
     const after = a ? tidy(rest.slice(a.index + a[0].length)) : '';
     return {
       date,
-      amount: a ? Number(a[1].replace(/,/g, '')) : null,
+      amount: a ? yenOf(a) : null,
       // 金額の後ろの 1〜2 文字は、矢印などの記号の読み違い
       merchant: joinText(before, after.length >= 3 ? after : ''),
       skip: !d && (SKIP.test(line) || COLUMNS.test(line)),
@@ -453,8 +469,8 @@
       .map(cleanLine);
     const amountOf = (l) => {
       if (!l || DATE_RE.test(l)) return null;
-      const a = l.match(AMOUNT_RE);
-      return a ? Number(a[1].replace(/,/g, '')) : null;
+      const a = l.match(AMOUNT_RE) || l.match(TAIL_AMOUNT);
+      return a ? yenOf(a) : null;
     };
     let best = null;
     ls.forEach((l, i) => {
