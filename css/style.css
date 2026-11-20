@@ -4579,6 +4579,16 @@ body.has-fab .view {
 .tone-neg .stat-value {
   color: var(--negative);
 }
+/* 明細に書かれた合計と、読み取った合計の比べ */
+.statement-total {
+  font-weight: 600;
+}
+.statement-total.tone-pos {
+  color: var(--positive);
+}
+.statement-total.tone-neg {
+  color: var(--negative);
+}
 .prow-list {
   margin: 0;
   padding: 0;
