@@ -11,7 +11,7 @@
  *   records: [{ id, cardId, date, place, amount, createdAt }],         // カードを使った記録
  *   statements: [{ id, cardId, month, rows: [{ id, date, merchant, amount, status, memo }], createdAt }],
  *       // カードの明細。month はお支払いの月(YYYY-MM)。status:null(まだ)/ ok(問題なし)/ ng(おかしい)
- *   known: [{ id, cardId, merchant, amount, since }],                 // 毎月の支払いとして覚えたもの
+ *   known: [{ id, cardId, merchant, amount, since, from, until }],    // 毎月の支払いとして覚えたもの(from より後・until までの月の明細に使う。空なら制限なし)
  * }
  *
  * 明細の行の見分け(judge):
@@ -76,7 +76,7 @@
       .slice(-STATEMENTS_MAX);
     c.known = list(r.known)
       .filter((k) => typeof k.cardId === 'string' && text(k.merchant) && yen(k.amount) !== null)
-      .map((k) => ({ id: id(k.id, 'known'), cardId: k.cardId, merchant: text(k.merchant), amount: k.amount, since: U.isYM(k.since) ? k.since : null }))
+      .map((k) => ({ id: id(k.id, 'known'), cardId: k.cardId, merchant: text(k.merchant), amount: k.amount, since: U.isYM(k.since) ? k.since : null, from: U.isYM(k.from) ? k.from : null, until: U.isYM(k.until) ? k.until : null }))
       .slice(-KNOWN_MAX);
     return c;
   }
@@ -177,25 +177,61 @@
     if (!row) return false;
     row.status = status === 'ok' || status === 'ng' ? status : null;
     if (memo !== undefined) row.memo = String(memo || '').slice(0, 300);
-    if (row.status === 'ok' && monthly) remember(p, st.cardId, row.merchant, row.amount, st.month);
+    // 毎月同じ支払いのチェックが無いときは、覚えを外さない(外すのは setMonthly で)
+    if (row.status === 'ok' && monthly === true) setMonthly(p, stId, rowId, true);
     return true;
   }
 
-  function remember(p, cardId, merchant, amount, since) {
-    const k = p.cardCheck.known.find((x) => x.cardId === cardId && similar(x.merchant, merchant) >= SIMILAR);
-    if (k) {
-      k.amount = amount;
-      k.merchant = text(merchant);
-    } else {
-      p.cardCheck.known.push({ id: U.uid('known'), cardId, merchant: text(merchant), amount, since: U.isYM(since) ? since : null });
-      if (p.cardCheck.known.length > KNOWN_MAX) p.cardCheck.known.splice(0, p.cardCheck.known.length - KNOWN_MAX);
-    }
+  /** 覚えを、その月の明細に使うか(from:この月より後に使う、until:この月まで使う。空なら制限なし) */
+  const appliesTo = (k, month) => (k.from == null || k.from < month) && (k.until == null || month <= k.until);
+
+  /** その行と同じお店・同じ金額で、次の月から使う覚え(毎月同じ支払いのチェックが付いているか) */
+  function monthlyOf(p, stId, rowId) {
+    const st = p.cardCheck.statements.find((s) => s.id === stId);
+    const row = st && st.rows.find((r) => r.id === rowId);
+    if (!row) return null;
+    const next = U.ymAdd(st.month, 1);
+    return p.cardCheck.known.find((k) => k.cardId === st.cardId && k.amount === row.amount && appliesTo(k, next) && similar(k.merchant, row.merchant) >= SIMILAR) || null;
   }
 
+  /**
+   * 毎月同じ支払いのチェックを付ける・外す。前の月の明細の判定は変えない。
+   * 付ける:その月の明細から覚え、次の月から使う。同じお店で金額の違う覚えは、その月までにする。
+   * 外す:その月に覚えたものなら消し、前の月から覚えていたものなら、その月までにする
+   */
+  function setMonthly(p, stId, rowId, on) {
+    const st = p.cardCheck.statements.find((s) => s.id === stId);
+    const row = st && st.rows.find((r) => r.id === rowId);
+    if (!row) return false;
+    const cur = monthlyOf(p, stId, rowId);
+    if (on) {
+      if (cur) return true;
+      const next = U.ymAdd(st.month, 1);
+      for (const k of p.cardCheck.known) if (k.cardId === st.cardId && appliesTo(k, next) && similar(k.merchant, row.merchant) >= SIMILAR) k.until = st.month;
+      p.cardCheck.known.push({ id: U.uid('known'), cardId: st.cardId, merchant: text(row.merchant), amount: row.amount, since: st.month, from: st.month, until: null });
+      if (p.cardCheck.known.length > KNOWN_MAX) p.cardCheck.known.splice(0, p.cardCheck.known.length - KNOWN_MAX);
+      return true;
+    }
+    if (!cur) return true;
+    if (cur.from === st.month) p.cardCheck.known = p.cardCheck.known.filter((k) => k !== cur);
+    else cur.until = st.month;
+    return true;
+  }
+
+  /** いま使っている覚え(この先も使うもの) */
+  function activeKnown(p, cardId) {
+    return p.cardCheck.known.filter((k) => k.cardId === cardId && k.until == null);
+  }
+
+  /** 一覧から忘れる:そのカードのいちばん新しい明細の月までにする(その月に覚えたもの・明細が無いときは消す) */
   function removeKnown(p, knownId) {
-    const before = p.cardCheck.known.length;
-    p.cardCheck.known = p.cardCheck.known.filter((k) => k.id !== knownId);
-    return p.cardCheck.known.length !== before;
+    const k = p.cardCheck.known.find((x) => x.id === knownId);
+    if (!k) return false;
+    const months = p.cardCheck.statements.filter((s) => s.cardId === k.cardId).map((s) => s.month).sort();
+    const last = months[months.length - 1];
+    if (last && (k.from == null || k.from < last)) k.until = last;
+    else p.cardCheck.known = p.cardCheck.known.filter((x) => x !== k);
+    return true;
   }
 
   function setPlaces(p, places) {
@@ -594,7 +630,7 @@
         const rec = recs
           .filter((x) => !used.has(x.id) && x.amount === r.amount && dayDiff(x.date, r.date) <= MATCH_DAYS)
           .sort((x, y) => dayDiff(x.date, r.date) - dayDiff(y.date, r.date))[0];
-        const k = known.find((x) => similar(x.merchant, r.merchant) >= SIMILAR);
+        const k = known.find((x) => appliesTo(x, st.month) && similar(x.merchant, r.merchant) >= SIMILAR);
         if (rec) {
           used.add(rec.id);
           res.kind = 'record';
@@ -610,6 +646,8 @@
           if (!k && r.amount <= SMALL_AMOUNT) res.reasons.push({ id: 'small', text: '少額(テスト決済かも)' });
           if (!k && !seenMerchants.some((m) => similar(m, r.merchant) >= SIMILAR)) res.reasons.push({ id: 'first', text: 'はじめての利用先' });
         }
+        // 確かめた行(問題なし・おかしい)は、あとで記録や覚えと合っても「確かめてほしいもの」に残す
+        if (r.status) res.kind = 'check';
         return res;
       });
       for (const r of st.rows) seenMerchants.push(r.merchant);
@@ -660,6 +698,9 @@
     removeStatement,
     setRowStatus,
     removeKnown,
+    monthlyOf,
+    setMonthly,
+    activeKnown,
     setPlaces,
     setCards,
     cleanLine,
