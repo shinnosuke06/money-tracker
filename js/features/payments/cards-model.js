@@ -575,6 +575,55 @@
     return out.map((r, i) => ({ r, i })).sort((x, y) => (x.r.date < y.r.date ? -1 : x.r.date > y.r.date ? 1 : x.i - y.i)).map((x) => x.r);
   }
 
+  const COMBOS_MAX = 10000; // 重複の選び方を探す数の上限(これより多いときは探さない)
+
+  /**
+   * 重複かもしれない行:同じ明細の中で、日付・金額が同じで、名前が似ている(どちらかが名前なしでもよい)行の 2 つ目から。
+   * 返金(0 円以下)は入れない。明細の合計が ref(請求額など)より多く、その差にぴったり合う選び方
+   * (まとまりごとに、2 つ目から何件を消すか)が 1 つだけなら、その行に checked を付ける
+   * @returns {{ items: Array<{ row, count, checked }>, total: number, diff: number|null, matched: boolean }}
+   */
+  function duplicates(rows, ref) {
+    const list = Array.isArray(rows) ? rows : [];
+    const groups = [];
+    for (const r of list) {
+      if (!(r.amount > 0)) continue;
+      const g = groups.find((x) => x[0].date === r.date && x[0].amount === r.amount && (nameless(x[0].merchant) || nameless(r.merchant) || similar(x[0].merchant, r.merchant) >= SIMILAR));
+      if (g) g.push(r);
+      else groups.push([r]);
+    }
+    const gs = groups.filter((g) => g.length > 1);
+    const total = list.reduce((t, r) => t + (r.amount || 0), 0);
+    const diff = Number.isSafeInteger(ref) ? total - ref : null;
+    let pick = null;
+    if (diff > 0 && gs.length && gs.reduce((n, g) => n * g.length, 1) <= COMBOS_MAX) {
+      const found = [];
+      const walk = (i, sum, chosen) => {
+        if (found.length > 1 || sum > diff) return;
+        if (i === gs.length) {
+          if (sum === diff) found.push(chosen);
+          return;
+        }
+        for (let c = 0; c < gs[i].length; c++) walk(i + 1, sum + c * gs[i][0].amount, [...chosen, c]);
+      };
+      walk(0, 0, []);
+      if (found.length === 1) pick = found[0];
+    }
+    const items = [];
+    gs.forEach((g, i) => g.slice(1).forEach((row, j) => items.push({ row, count: g.length, checked: !!pick && j < pick[i] })));
+    return { items, total, diff, matched: !!pick };
+  }
+
+  /** 保存した明細から、選んだ行を消す(ほかの行と確かめた印はそのまま)。消した数を返す */
+  function removeRows(p, stId, rowIds) {
+    const st = p.cardCheck.statements.find((s) => s.id === stId);
+    if (!st) return 0;
+    const ids = new Set(Array.isArray(rowIds) ? rowIds : []);
+    const before = st.rows.length;
+    st.rows = st.rows.filter((r) => !ids.has(r.id));
+    return before - st.rows.length;
+  }
+
   // ---------------------------------------------------------------
   // 突き合わせ
   // ---------------------------------------------------------------
@@ -701,6 +750,8 @@
     monthlyOf,
     setMonthly,
     activeKnown,
+    duplicates,
+    removeRows,
     setPlaces,
     setCards,
     cleanLine,

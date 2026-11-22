@@ -404,6 +404,48 @@ test('v16 のデータを開くと、覚えは全部の月に使う(from・until
   assert.equal(C.judgeCard(res.data.payments, 'cardA').get('s1')[0].kind, 'known'); // いまと同じく、その月にも使う
 });
 
+test('重複かもしれない行:差額にぴったり合う選び方が 1 つならチェック。一括で消す', () => {
+  const R = (id, date, merchant, amount) => ({ id, date, merchant, amount, status: null });
+  const rows = [R('a', '2026-10-05', '架空カフェ', 520), R('b', '2026-10-05', '架空カフェ', 520), R('c', '2026-10-23', '架空くじ', 350), R('d', '2026-10-23', '架空くじ', 350), R('e', '2026-10-24', '架空ストア', 1200)];
+  const total = 520 * 2 + 350 * 2 + 1200;
+  const pick = (d) => d.items.filter((x) => x.checked).map((x) => x.row.id);
+  let d = C.duplicates(rows, total - 350);
+  assert.deepEqual(d.items.map((x) => [x.row.id, x.count]), [['b', 2], ['d', 2]]);
+  assert.deepEqual(pick(d), ['d']);
+  assert.deepEqual([d.matched, d.diff, d.total], [true, 350, total]);
+  // 合計が同じ・請求額が無い・差が合わない → チェックなし
+  for (const ref of [total, null, total - 999]) {
+    d = C.duplicates(rows, ref);
+    assert.deepEqual(pick(d), []);
+    assert.equal(d.matched, false);
+  }
+  assert.equal(C.duplicates(rows, null).diff, null);
+  // 名前が読めなかった行も、日付と金額で候補にする。マイナスの行は候補にしない
+  d = C.duplicates([R('a', '2026-10-05', '架空カフェ', 520), R('b', '2026-10-05', '(名前なし)', 520), R('m', '2026-10-06', '架空ストア', -800), R('n', '2026-10-06', '架空ストア', -800)], null);
+  assert.deepEqual(d.items.map((x) => x.row.id), ['b']);
+  // 同じ金額のまとまりが 2 つで、差がその 1 つ分 → 選び方が 2 つあるのでチェックなし
+  const two = [R('a', '2026-10-05', '架空カフェ', 520), R('b', '2026-10-05', '架空カフェ', 520), R('c', '2026-10-09', '架空パン', 520), R('d', '2026-10-09', '架空パン', 520)];
+  assert.deepEqual(pick(C.duplicates(two, 520 * 3)), []);
+  // 候補がとても多い → 探さずにすぐ返す
+  const many = [];
+  for (const [i, name] of ['架空A', '架空B', '架空C'].entries()) for (let j = 0; j < 30; j++) many.push(R(`${i}-${j}`, `2026-10-1${i}`, name, 100 + i));
+  const t0 = Date.now();
+  d = C.duplicates(many, many.reduce((t, r) => t + r.amount, 0) - 100);
+  assert.deepEqual(pick(d), []);
+  assert.equal(d.items.length, 87);
+  assert.ok(Date.now() - t0 < 500);
+
+  // 保存した明細から、選んだ行だけを消す(残った行の確かめた印はそのまま)
+  const p = fixture();
+  const st = C.saveStatement(p, { cardId: 'cardA', month: '2026-11', rows: rows.map(({ id: _id, ...r }) => r) }, NOW).statement;
+  C.setRowStatus(p, st.id, st.rows[0].id, 'ok');
+  assert.equal(C.removeRows(p, st.id, [st.rows[3].id, 'nope']), 1);
+  const saved = p.cardCheck.statements.find((x) => x.id === st.id);
+  assert.equal(saved.rows.length, 4);
+  assert.equal(saved.rows[0].status, 'ok');
+  assert.equal(C.removeRows(p, 'nope', [saved.rows[0].id]), 0);
+});
+
 test('名前が少し違っても(読み違い)同じお店とみなす', () => {
   assert.ok(C.similar('保険料 架空生命', '保険料如空生命') >= 0.5);
   assert.ok(C.similar('動画配信サービスC', '動画配信サ-ビスC') >= 0.5);
