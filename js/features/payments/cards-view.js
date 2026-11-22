@@ -189,6 +189,85 @@
   // 画面:カードの明細
   // ---------------------------------------------------------------
 
+  /**
+   * 重複かもしれない行の欄(読み取った直後と、保存した明細の画面で同じもの)。候補が無ければ null。
+   * onDelete には、チェックした行(rows の中のもの)を渡す
+   */
+  function dupBox(rows, ref, refName, onDelete) {
+    const d = C.duplicates(rows, ref);
+    if (!d.items.length) return null;
+    const why =
+      d.diff == null
+        ? `${refName}が分からないので、金額の差では見比べられません。本当に 2 回使ったものか、確かめてください。`
+        : d.matched
+          ? `明細の合計が${refName}より ${yen(d.diff)} 多く、チェックした行の合計と同じです。重複の可能性が高いので、チェックを付けています。`
+          : d.diff === 0
+            ? `明細の合計は${refName}と同じです。本当に 2 回使ったのかもしれないので、チェックは付けていません。`
+            : `明細の合計と${refName}の差(${yen(Math.abs(d.diff))}${d.diff > 0 ? '多い' : '少ない'})が、下の行の合計と合いません。チェックは付けていません。`;
+    const del = btn('', { variant: 'danger', size: 'small' });
+    const boxes = [];
+    const sync = () => {
+      const on = boxes.filter((b) => b.input.checked);
+      del.disabled = !on.length;
+      del.textContent = on.length ? `チェックした ${on.length}件を消す(${yen(on.reduce((t, b) => t + b.row.amount, 0))})` : 'チェックした行を消す';
+    };
+    const list = h(
+      'ul',
+      { class: 'dup-list' },
+      d.items.map((it) => {
+        const input = h('input', { type: 'checkbox', checked: it.checked, onChange: sync, 'aria-label': `${md(it.row.date)} ${it.row.merchant} ${yen(it.row.amount)} を消す` });
+        boxes.push({ input, row: it.row });
+        return h(
+          'li',
+          null,
+          h(
+            'label',
+            { class: 'dup-row' },
+            input,
+            h('span', { class: 'dup-main' }, h('span', { class: 'dup-name', text: it.row.merchant }), h('span', { class: 'dup-meta', text: `${md(it.row.date)}・同じ行がほかに ${it.count - 1}つ` })),
+            h('span', { class: 'dup-amount', text: yen(it.row.amount) })
+          )
+        );
+      })
+    );
+    del.addEventListener('click', () => {
+      const picked = boxes.filter((b) => b.input.checked).map((b) => b.row);
+      if (picked.length) onDelete(picked);
+    });
+    sync();
+    return h('div', { class: 'dup-box' }, h('p', { class: `dup-why${d.matched ? ' is-strong' : ''}`, text: why }), list, h('div', { class: 'button-row' }, del));
+  }
+
+  /** 保存した明細の「重複かもしれない行」(請求額と見比べる) */
+  function dupCard(p, st) {
+    const box = dupBox(st.rows, C.totals(p, st).billAmount, '請求額', (picked) => {
+      let n = 0;
+      if (store.update((d) => (n = C.removeRows(d.payments, st.id, picked.map((r) => r.id))), { backup: 'カードの明細の重複の削除' })) toast(`${n}件を消しました`);
+    });
+    return box ? h('section', { class: 'card' }, h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: '重複かもしれない行' })), box) : null;
+  }
+
+  /** 次のお支払いの予想(毎月の支払い + まだ明細に出ていない記録)。どちらも無ければ null */
+  function forecastCard(p, cardId) {
+    const f = C.forecast(p, cardId);
+    if (!f.monthly.length && !f.records.length) return null;
+    return h(
+      'section',
+      { class: 'card' },
+      h('div', { class: 'card-head' }, h('h2', { class: 'card-title', text: `次のお支払いの予想(${Number(f.month.slice(5))}月払い)` })),
+      h('p', { class: 'forecast-total' }, h('small', { text: '少なくとも' }), yen(f.total)),
+      h(
+        'ul',
+        { class: 'forecast-list' },
+        h('li', null, h('span', { text: `毎月の支払い(${f.monthly.length}件)` }), h('span', { text: yen(f.monthlyTotal) })),
+        f.monthly.map((k) => h('li', { class: 'sub' }, h('span', { text: k.merchant }), h('span', { text: yen(k.amount) }))),
+        h('li', null, h('span', { text: `まだ明細に出ていない記録(${f.records.length}件)` }), h('span', { text: yen(f.recordsTotal) })),
+        f.records.map((r) => h('li', { class: 'sub' }, h('span', { text: `${md(r.date)} ${r.place || 'お店'}` }), h('span', { text: yen(r.amount) })))
+      ),
+      h('p', { class: 'hint', text: '記録していない使い方(ネットの買い物など)は入っていません。毎月の支払いは、覚えている金額で計算しています。' })
+    );
+  }
+
   function render(container) {
     MT.paymentsView.head(container, 'payments/cards');
     const p = pay();
@@ -243,6 +322,8 @@
     }
 
     container.append(summaryCard(p, cardId, st, judged, month));
+    if (st) add(container, dupCard(p, st));
+    add(container, forecastCard(p, cardId));
     if (st) {
       const check = judged.filter((r) => r.kind === 'check');
       const okRows = judged.filter((r) => r.kind !== 'check');
@@ -325,9 +406,53 @@
     return h('div', { class: `stat ${cls}`.trim() }, h('span', { class: 'stat-label', text: label }), h('span', { class: 'stat-value' }, String(value), h('small', { text: '件' })));
   }
 
+  const MONTHLY_NAME = /保険|料金|サブスク|配信|会費|月額|定期/;
+
+  /** 「毎月同じ支払い」のチェック */
+  function monthlyBox(checked, onChange) {
+    const input = h('input', { type: 'checkbox', checked, onChange: onChange ? (e) => onChange(e.target.checked) : null });
+    return { el: h('label', { class: 'check-monthly' }, input, h('span', { text: '毎月同じ支払い' })), input };
+  }
+
   function checkRow(st, r) {
     const m = r.status;
     const tone = (x) => (/double|foreign|small/.test(x.id) ? 'chip-down' : 'chip-warn');
+    const known = !!C.monthlyOf(pay(), st.id, r.id);
+    let actions;
+    if (!m) {
+      // 未確認:「問題なし」を 1 回押すだけ。チェックが付いていれば、毎月の支払いとして覚える
+      const box = monthlyBox(known || MONTHLY_NAME.test(r.merchant) || r.reasons.some((x) => x.id === 'changed'));
+      actions = h(
+        'div',
+        { class: 'check-actions' },
+        btn('問題なし', {
+          size: 'small',
+          variant: 'primary',
+          onClick: () => {
+            const monthly = box.input.checked;
+            if (store.update((d) => C.setRowStatus(d.payments, st.id, r.id, 'ok', { monthly }))) toast(monthly ? '確認済みにして、毎月の支払いとして覚えました' : '確認済みにしました');
+          },
+        }),
+        btn('おかしい', { size: 'small', variant: 'ghost', className: 'btn-ghost-danger', onClick: () => ngFlow(st, r) }),
+        box.el
+      );
+    } else {
+      // 確認済み:「問題なし」のあとも、毎月同じ支払いのチェックを付け外しできる
+      const box =
+        m === 'ok'
+          ? monthlyBox(known, (on) => {
+              if (store.update((d) => C.setMonthly(d.payments, st.id, r.id, on))) toast(on ? '毎月の支払いとして覚えました' : '毎月の支払いから外しました');
+            })
+          : null;
+      actions = h(
+        'div',
+        { class: 'check-done' },
+        h('span', { class: `chip ${m === 'ok' ? 'chip-up' : 'chip-down'}`, text: m === 'ok' ? '問題なし(確認済み)' : 'おかしい' }),
+        r.memo ? h('span', { class: 'check-memo', text: r.memo }) : null,
+        btn('戻す', { size: 'small', variant: 'ghost', onClick: () => store.update((d) => C.setRowStatus(d.payments, st.id, r.id, null)) }),
+        box ? box.el : null
+      );
+    }
     return h(
       'li',
       { class: `pay-row no-check card-check${m ? ` is-${m}` : ' is-pending'}` },
@@ -338,40 +463,8 @@
         h('span', { class: 'pay-meta' }, h('span', { text: md(r.date) }), ...r.reasons.map((x) => h('span', { class: `chip ${tone(x)}`, text: x.text }))),
         h('span', { class: 'pay-amount', text: yen(r.amount) })
       ),
-      m
-        ? h(
-            'div',
-            { class: 'check-done' },
-            h('span', { class: `chip ${m === 'ok' ? 'chip-up' : 'chip-down'}`, text: m === 'ok' ? '問題なし(確認済み)' : 'おかしい' }),
-            r.memo ? h('span', { class: 'check-memo', text: r.memo }) : null,
-            btn('戻す', { size: 'small', variant: 'ghost', onClick: () => store.update((d) => C.setRowStatus(d.payments, st.id, r.id, null)) })
-          )
-        : h(
-            'div',
-            { class: 'check-actions' },
-            btn('問題なし', { size: 'small', variant: 'primary', onClick: () => okFlow(st, r) }),
-            btn('おかしい', { size: 'small', variant: 'ghost', className: 'btn-ghost-danger', onClick: () => ngFlow(st, r) })
-          ),
+      actions,
       m === 'ng' ? h('p', { class: 'check-help', text: 'カードの裏に書いてある電話番号(カード会社)に連絡し、利用を止めてもらいましょう。カード会社のアプリで止められることもあります。' }) : null
-    );
-  }
-
-  function okFlow(st, r) {
-    const s = openSheet({ title: '問題なしにする', description: `${r.merchant}・${yen(r.amount)}` });
-    const box = MT.forms.checkbox('毎月の支払いとして覚える(次の月から、同じお店・同じ金額なら確かめなくてよい)', /保険|料金|サブスク|配信|会費|月額|定期/.test(r.merchant) || r.reasons.some((x) => x.id === 'changed'));
-    s.body.append(box.el, h('p', { class: 'form-hint', text: '金額が変わったときは、また「確かめてほしいもの」に出ます。' }));
-    s.foot.append(
-      btn('キャンセル', { onClick: () => s.close() }),
-      btn('問題なし', {
-        variant: 'primary',
-        onClick: () => {
-          const monthly = box.input.checked;
-          if (store.update((d) => C.setRowStatus(d.payments, st.id, r.id, 'ok', { monthly }))) {
-            s.close();
-            toast(monthly ? '確認済みにして、毎月の支払いとして覚えました' : '確認済みにしました');
-          }
-        },
-      })
     );
   }
 
@@ -419,7 +512,7 @@
   }
 
   function knownCard(p, cardId) {
-    const known = p.cardCheck.known.filter((k) => k.cardId === cardId);
+    const known = C.activeKnown(p, cardId);
     if (!known.length) return null;
     return h(
       'details',
@@ -502,6 +595,19 @@
     const file = h('input', { type: 'file', accept: 'image/*', multiple: true, hidden: true, id: 'statement-file' });
     const ta = h('textarea', { class: 'field-textarea', id: 'statement-text', rows: 6, placeholder: 'ここに貼り付け(長押し →「ペースト」)' });
 
+    // 重複かもしれない行:選んだ月が支払いの月で請求額があれば請求額と、無ければスクショから見つけた合計と見比べる
+    const sheetDup = () => {
+      const bill = p.bills.find((b) => b.id === curCard);
+      const useBill = !!bill && bill.amount != null && monthSel.value === p.month;
+      const box = dupBox(rows, useBill ? bill.amount : stated, useBill ? '請求額' : '明細に書かれた合計', (picked) => {
+        const gone = new Set(picked);
+        rows = rows.filter((r) => !gone.has(r));
+        toast(`${gone.size}件を消しました`);
+        drawTable();
+      });
+      return box ? h('div', { class: 'dup-sheet' }, h('h3', { class: 'dup-title', text: '重複かもしれない行' }), box) : null;
+    };
+
     const drawTable = () => {
       if (!rows.length) {
         table.replaceChildren();
@@ -521,6 +627,7 @@
                 ? `明細に書かれた合計は ${yen(stated)} で、${yen(Math.abs(diff))} ${diff > 0 ? '多く' : '少なく'}読んでいます。読めていない行や、金額の読み違いがないか確かめてください。`
                 : `明細に書かれた合計(${yen(stated)})と同じです。`,
             }),
+        sheetDup(),
         h(
           'ul',
           { class: 'prow-list' },
@@ -560,6 +667,8 @@
         h('div', { class: 'button-row' }, btn('行を足す', { size: 'small', icon: 'plus', onClick: () => { rows.push({ date: U.todayStr(), merchant: '', amount: 0 }); drawTable(); } }))
       );
     };
+
+    monthSel.addEventListener('change', drawTable); // 月を変えると、見比べる金額(請求額)も変わる
 
     const readText = (texts) => {
       const pm = monthSel.value;

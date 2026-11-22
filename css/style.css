@@ -4579,6 +4579,125 @@ body.has-fab .view {
 .tone-neg .stat-value {
   color: var(--negative);
 }
+/* 重複かもしれない行(読み取った直後と、保存した明細の画面) */
+.dup-box {
+  display: grid;
+  gap: 8px;
+}
+.dup-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+.dup-sheet {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.dup-why {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.dup-why.is-strong {
+  color: var(--negative);
+  font-weight: 600;
+}
+.dup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+.dup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.dup-row input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  accent-color: var(--danger);
+}
+.dup-main {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.dup-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.dup-meta {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.dup-amount {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* 「毎月同じ支払い」のチェック(確かめてほしいものの、金額の下) */
+.check-monthly {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.check-monthly input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+}
+/* 次のお支払いの予想 */
+.forecast-total {
+  margin: 4px 0 8px;
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.forecast-total small {
+  margin-right: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.forecast-list {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.forecast-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.forecast-list li span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.forecast-list .sub {
+  padding-left: 12px;
+  font-size: 13px;
+  color: var(--text-3);
+}
 /* 明細に書かれた合計と、読み取った合計の比べ */
 .statement-total {
   font-weight: 600;
