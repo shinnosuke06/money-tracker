@@ -25,16 +25,17 @@
  *   v13 → v14:月末記録の項目に「まとめ」(group。証券会社など)を追加(js/features/monthly/model.js)
  *   v14 → v15:資産に開示・決算(assets.ir:気になる銘柄・見た開示・手で入れた決算発表予定日)を追加(js/features/assets/ir-model.js)
  *   v15 → v16:支払いにカードを使った記録とカードの明細の確認(payments.cardCheck)を追加(js/features/payments/cards-model.js)
+ *   v16 → v17:カードの明細の、毎月の支払いの覚えに使う月の範囲(from・until)を追加(js/features/payments/model.js)
  */
 (function (root) {
   'use strict';
   const MT = (root.MT = root.MT || {});
 
   const APP_ID = 'money-tracker';
-  const SCHEMA_VERSION = 16;
+  const SCHEMA_VERSION = 17;
   // アプリの版。設定に出し、新しい版の確認(js/core/update.js)にも使う。
   // 変更を出すたびに上げ、index.html の各ファイルの ?v= も同じ値にそろえる(テストで確かめる)
-  const APP_VERSION = '2026.11.20-4';
+  const APP_VERSION = '2026.11.22-1';
   const STORAGE_KEY = 'moneyTracker:data';
   const BACKUP_KEY = 'moneyTracker:backup';
   const CORRUPT_PREFIX = 'moneyTracker:corrupt:';

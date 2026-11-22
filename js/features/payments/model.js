@@ -837,6 +837,13 @@
       d.schemaVersion = 16;
       return d;
     });
+    // v16 → v17:毎月の支払いの覚えに、使う月の範囲(from・until)を足す。いまある覚えは空(全部の月に使う)
+    MT.store.addMigration(16, (d) => {
+      const c = d.payments && d.payments.cardCheck;
+      if (c && Array.isArray(c.known)) for (const k of c.known) if (k && typeof k === 'object') Object.assign(k, { from: null, until: null });
+      d.schemaVersion = 17;
+      return d;
+    });
   }
 
   MT.paymentsModel = {

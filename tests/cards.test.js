@@ -322,7 +322,7 @@ test('突き合わせ:記録と一致・毎月の支払い・確かめてほし�
   assert.deepEqual(C.totals(p, st), { total: 35624, billAmount: 35624, diff: 0 });
   // 問題なし(毎月の支払いとして覚える)→ 次の月から同じ金額なら確かめなくてよい
   C.setRowStatus(p, st.id, phone.id, 'ok', { monthly: true });
-  assert.equal(p.cardCheck.known.find((k) => k.merchant.startsWith('スマホ')).amount, 5480);
+  assert.equal(C.activeKnown(p, 'cardA').find((k) => k.merchant.startsWith('スマホ')).amount, 5480);
   C.setRowStatus(p, st.id, shop[0].id, 'ng', { memo: '心当たりがない' });
   assert.equal(C.pending(p).length, 2);
   // 入れ直しても、確かめた印は同じ行に残る
@@ -332,6 +332,142 @@ test('突き合わせ:記録と一致・毎月の支払い・確かめてほし�
   // 返金(マイナス)は確かめなくてよい
   const st2 = C.saveStatement(p, { cardId: 'cardB', month: '2026-11', rows: [{ date: '2026-10-30', merchant: '架空ストア', amount: -1000 }] }, NOW).statement;
   assert.equal(C.judgeCard(p, 'cardB').get(st2.id)[0].kind, 'known');
+});
+
+test('毎月同じ支払い:問題なしのあとも付け外しでき、前の月の判定は変わらない', () => {
+  const p = fixture();
+  const kind = (st, i) => C.judgeCard(p, 'cardA').get(st.id)[i];
+  const oct = C.saveStatement(p, { cardId: 'cardA', month: '2026-10', rows: [
+    { date: '2026-09-15', merchant: '架空モバイル料金', amount: 3210 },
+    { date: '2026-09-20', merchant: '架空ジム会費', amount: 2500 },
+  ] }, NOW).statement;
+  // 問題なし・毎月同じ支払い → その行は確かめた行のまま(チェックが残る)。次の月から使う
+  C.setRowStatus(p, oct.id, oct.rows[0].id, 'ok', { monthly: true });
+  assert.equal(kind(oct, 0).kind, 'check');
+  assert.equal(kind(oct, 0).status, 'ok');
+  assert.ok(C.monthlyOf(p, oct.id, oct.rows[0].id));
+  const nov = C.saveStatement(p, { cardId: 'cardA', month: '2026-11', rows: [
+    { date: '2026-10-15', merchant: '架空モバイル料金', amount: 3210 },
+    { date: '2026-10-16', merchant: '架空モバイル料金', amount: 3650 },
+  ] }, NOW).statement;
+  assert.equal(kind(nov, 0).kind, 'known');
+  assert.equal(kind(nov, 1).reasons[0].id, 'changed');
+  // 11 月の金額で覚え直す → 前の覚えは 11 月まで、新しい覚えは 11 月から(12 月の明細に使う)
+  assert.equal(C.setMonthly(p, nov.id, nov.rows[1].id, true), true);
+  assert.deepEqual(p.cardCheck.known.filter((k) => k.merchant === '架空モバイル料金').map((k) => [k.amount, k.from, k.until]), [[3210, '2026-10', '2026-11'], [3650, '2026-11', null]]);
+  assert.equal(kind(nov, 0).kind, 'known'); // 前の金額の行の判定は変わらない
+  assert.equal(C.activeKnown(p, 'cardA').find((k) => k.merchant === '架空モバイル料金').amount, 3650);
+  const dec = C.saveStatement(p, { cardId: 'cardA', month: '2026-12', rows: [{ date: '2026-11-15', merchant: '架空モバイル料金', amount: 3650 }] }, NOW).statement;
+  assert.equal(kind(dec, 0).kind, 'known');
+  // 11 月の行で外す → 11 月に覚えたものは消え、前の覚えは 11 月までのまま。要確認は 12 月の行だけ増える
+  const before = C.pending(p).length;
+  assert.equal(C.setMonthly(p, nov.id, nov.rows[1].id, false), true);
+  assert.equal(C.monthlyOf(p, nov.id, nov.rows[1].id), null);
+  assert.deepEqual(p.cardCheck.known.filter((k) => k.merchant === '架空モバイル料金').map((k) => [k.amount, k.until]), [[3210, '2026-11']]);
+  assert.equal(kind(nov, 0).kind, 'known');
+  assert.equal(kind(dec, 0).kind, 'check');
+  assert.equal(C.pending(p).length, before + 1);
+  // 問題なし(毎月同じ支払いのチェックなし)では、覚えを外さない
+  C.setRowStatus(p, oct.id, oct.rows[1].id, 'ok', { monthly: true });
+  C.setRowStatus(p, oct.id, oct.rows[1].id, 'ok', { monthly: false });
+  assert.ok(C.monthlyOf(p, oct.id, oct.rows[1].id));
+
+  // 一覧の「忘れる」:いちばん新しい明細の月までにする。その月までの判定はそのまま
+  const q = fixture();
+  const s1 = C.saveStatement(q, { cardId: 'cardA', month: '2026-10', rows: [{ date: '2026-09-20', merchant: '架空ジム会費', amount: 2500 }] }, NOW).statement;
+  C.setRowStatus(q, s1.id, s1.rows[0].id, 'ok', { monthly: true });
+  const s2 = C.saveStatement(q, { cardId: 'cardA', month: '2026-11', rows: [{ date: '2026-10-20', merchant: '架空ジム会費', amount: 2500 }] }, NOW).statement;
+  assert.equal(C.judgeCard(q, 'cardA').get(s2.id)[0].kind, 'known');
+  assert.equal(C.removeKnown(q, C.activeKnown(q, 'cardA')[0].id), true);
+  assert.equal(C.activeKnown(q, 'cardA').length, 0);
+  assert.equal(C.judgeCard(q, 'cardA').get(s2.id)[0].kind, 'known');
+  assert.equal(C.pending(q).length, 0);
+  // いちばん新しい明細の月に覚えたものを忘れると、消える
+  C.setMonthly(q, s2.id, s2.rows[0].id, true);
+  assert.equal(C.activeKnown(q, 'cardA')[0].from, '2026-11');
+  C.removeKnown(q, C.activeKnown(q, 'cardA')[0].id);
+  assert.equal(q.cardCheck.known.length, 1);
+});
+
+test('v16 のデータを開くと、覚えは全部の月に使う(from・until が空)', () => {
+  const v16 = store.createEmpty(NOW);
+  v16.schemaVersion = 16;
+  v16.payments.bills = [{ id: 'cardA', name: '架空カードA', amount: 1000, dueDay: 27, category: 'variable' }];
+  v16.payments.cardCheck.known = [{ id: 'k1', cardId: 'cardA', merchant: '架空ジム会費', amount: 2500, since: '2026-10' }];
+  v16.payments.cardCheck.statements = [{ id: 's1', cardId: 'cardA', month: '2026-10', rows: [{ id: 'r1', date: '2026-09-20', merchant: '架空ジム会費', amount: 2500, status: null }], createdAt: null }];
+  const res = store.prepare(JSON.parse(JSON.stringify(v16)));
+  assert.equal(res.ok, true);
+  assert.ok(store.SCHEMA_VERSION >= 17);
+  assert.equal(res.data.schemaVersion, store.SCHEMA_VERSION);
+  const k = res.data.payments.cardCheck.known[0];
+  assert.deepEqual([k.since, k.from, k.until], ['2026-10', null, null]);
+  assert.equal(C.judgeCard(res.data.payments, 'cardA').get('s1')[0].kind, 'known'); // いまと同じく、その月にも使う
+});
+
+test('重複かもしれない行:差額にぴったり合う選び方が 1 つならチェック。一括で消す', () => {
+  const R = (id, date, merchant, amount) => ({ id, date, merchant, amount, status: null });
+  const rows = [R('a', '2026-10-05', '架空カフェ', 520), R('b', '2026-10-05', '架空カフェ', 520), R('c', '2026-10-23', '架空くじ', 350), R('d', '2026-10-23', '架空くじ', 350), R('e', '2026-10-24', '架空ストア', 1200)];
+  const total = 520 * 2 + 350 * 2 + 1200;
+  const pick = (d) => d.items.filter((x) => x.checked).map((x) => x.row.id);
+  let d = C.duplicates(rows, total - 350);
+  assert.deepEqual(d.items.map((x) => [x.row.id, x.count]), [['b', 2], ['d', 2]]);
+  assert.deepEqual(pick(d), ['d']);
+  assert.deepEqual([d.matched, d.diff, d.total], [true, 350, total]);
+  // 合計が同じ・請求額が無い・差が合わない → チェックなし
+  for (const ref of [total, null, total - 999]) {
+    d = C.duplicates(rows, ref);
+    assert.deepEqual(pick(d), []);
+    assert.equal(d.matched, false);
+  }
+  assert.equal(C.duplicates(rows, null).diff, null);
+  // 名前が読めなかった行も、日付と金額で候補にする。マイナスの行は候補にしない
+  d = C.duplicates([R('a', '2026-10-05', '架空カフェ', 520), R('b', '2026-10-05', '(名前なし)', 520), R('m', '2026-10-06', '架空ストア', -800), R('n', '2026-10-06', '架空ストア', -800)], null);
+  assert.deepEqual(d.items.map((x) => x.row.id), ['b']);
+  // 同じ金額のまとまりが 2 つで、差がその 1 つ分 → 選び方が 2 つあるのでチェックなし
+  const two = [R('a', '2026-10-05', '架空カフェ', 520), R('b', '2026-10-05', '架空カフェ', 520), R('c', '2026-10-09', '架空パン', 520), R('d', '2026-10-09', '架空パン', 520)];
+  assert.deepEqual(pick(C.duplicates(two, 520 * 3)), []);
+  // 候補がとても多い → 探さずにすぐ返す
+  const many = [];
+  for (const [i, name] of ['架空A', '架空B', '架空C'].entries()) for (let j = 0; j < 30; j++) many.push(R(`${i}-${j}`, `2026-10-1${i}`, name, 100 + i));
+  const t0 = Date.now();
+  d = C.duplicates(many, many.reduce((t, r) => t + r.amount, 0) - 100);
+  assert.deepEqual(pick(d), []);
+  assert.equal(d.items.length, 87);
+  assert.ok(Date.now() - t0 < 500);
+
+  // 保存した明細から、選んだ行だけを消す(残った行の確かめた印はそのまま)
+  const p = fixture();
+  const st = C.saveStatement(p, { cardId: 'cardA', month: '2026-11', rows: rows.map(({ id: _id, ...r }) => r) }, NOW).statement;
+  C.setRowStatus(p, st.id, st.rows[0].id, 'ok');
+  assert.equal(C.removeRows(p, st.id, [st.rows[3].id, 'nope']), 1);
+  const saved = p.cardCheck.statements.find((x) => x.id === st.id);
+  assert.equal(saved.rows.length, 4);
+  assert.equal(saved.rows[0].status, 'ok');
+  assert.equal(C.removeRows(p, 'nope', [saved.rows[0].id]), 0);
+});
+
+test('次のお支払いの予想:毎月の支払い + まだ明細に出ていない記録', () => {
+  const p = fixture();
+  // 明細が無いカード:支払いの月の次の月。記録は全部
+  C.addRecord(p, { cardId: 'cardB', date: '2026-10-02', place: 'コンビニ', amount: 430 }, NOW);
+  let f = C.forecast(p, 'cardB');
+  assert.equal(f.month, '2026-12');
+  assert.deepEqual([f.monthlyTotal, f.recordsTotal, f.total], [0, 430, 430]);
+
+  const oct = C.saveStatement(p, { cardId: 'cardA', month: '2026-10', rows: [{ date: '2026-09-20', merchant: '架空ジム会費', amount: 2500 }, { date: '2026-09-21', merchant: '架空配信', amount: 990 }] }, NOW).statement;
+  for (const r of oct.rows) C.setRowStatus(p, oct.id, r.id, 'ok', { monthly: true });
+  for (const [date, amount] of [['2026-09-28', 610], ['2026-10-05', 1340], ['2026-11-03', 720]]) C.addRecord(p, { cardId: 'cardA', date, place: 'スーパー', amount }, NOW);
+  const nov = C.saveStatement(p, { cardId: 'cardA', month: '2026-11', rows: [
+    { date: '2026-10-01', merchant: '架空ジム会費', amount: 2500 },
+    { date: '2026-10-05', merchant: '架空スーパー', amount: 1340 },
+    { date: '2026-10-21', merchant: '架空配信', amount: 990 },
+  ] }, NOW).statement;
+  C.setMonthly(p, nov.id, nov.rows[2].id, false); // 配信は 11 月までにする(12 月の予想に入らない)
+  f = C.forecast(p, 'cardA');
+  assert.equal(f.month, '2026-12');
+  assert.deepEqual(f.monthly.map((k) => [k.merchant, k.amount]), [['架空ジム会費', 2500]]);
+  assert.deepEqual(f.records.map((r) => r.amount), [720]); // 1,340 は明細と一致、610 は明細の最初の日より前
+  assert.deepEqual([f.monthlyTotal, f.recordsTotal, f.total], [2500, 720, 3220]);
 });
 
 test('名前が少し違っても(読み違い)同じお店とみなす', () => {
