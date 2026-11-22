@@ -446,6 +446,30 @@ test('重複かもしれない行:差額にぴったり合う選び方が 1 つ�
   assert.equal(C.removeRows(p, 'nope', [saved.rows[0].id]), 0);
 });
 
+test('次のお支払いの予想:毎月の支払い + まだ明細に出ていない記録', () => {
+  const p = fixture();
+  // 明細が無いカード:支払いの月の次の月。記録は全部
+  C.addRecord(p, { cardId: 'cardB', date: '2026-10-02', place: 'コンビニ', amount: 430 }, NOW);
+  let f = C.forecast(p, 'cardB');
+  assert.equal(f.month, '2026-12');
+  assert.deepEqual([f.monthlyTotal, f.recordsTotal, f.total], [0, 430, 430]);
+
+  const oct = C.saveStatement(p, { cardId: 'cardA', month: '2026-10', rows: [{ date: '2026-09-20', merchant: '架空ジム会費', amount: 2500 }, { date: '2026-09-21', merchant: '架空配信', amount: 990 }] }, NOW).statement;
+  for (const r of oct.rows) C.setRowStatus(p, oct.id, r.id, 'ok', { monthly: true });
+  for (const [date, amount] of [['2026-09-28', 610], ['2026-10-05', 1340], ['2026-11-03', 720]]) C.addRecord(p, { cardId: 'cardA', date, place: 'スーパー', amount }, NOW);
+  const nov = C.saveStatement(p, { cardId: 'cardA', month: '2026-11', rows: [
+    { date: '2026-10-01', merchant: '架空ジム会費', amount: 2500 },
+    { date: '2026-10-05', merchant: '架空スーパー', amount: 1340 },
+    { date: '2026-10-21', merchant: '架空配信', amount: 990 },
+  ] }, NOW).statement;
+  C.setMonthly(p, nov.id, nov.rows[2].id, false); // 配信は 11 月までにする(12 月の予想に入らない)
+  f = C.forecast(p, 'cardA');
+  assert.equal(f.month, '2026-12');
+  assert.deepEqual(f.monthly.map((k) => [k.merchant, k.amount]), [['架空ジム会費', 2500]]);
+  assert.deepEqual(f.records.map((r) => r.amount), [720]); // 1,340 は明細と一致、610 は明細の最初の日より前
+  assert.deepEqual([f.monthlyTotal, f.recordsTotal, f.total], [2500, 720, 3220]);
+});
+
 test('名前が少し違っても(読み違い)同じお店とみなす', () => {
   assert.ok(C.similar('保険料 架空生命', '保険料如空生命') >= 0.5);
   assert.ok(C.similar('動画配信サービスC', '動画配信サ-ビスC') >= 0.5);

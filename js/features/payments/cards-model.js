@@ -725,6 +725,26 @@
   }
 
   /** 明細の合計と、そのカードの支払いの請求額(その月) */
+  /**
+   * 次のお支払いの予想:毎月の支払いとして覚えたもの(その月に使うもの)+ まだ明細に出ていない記録。
+   * 月は、そのカードのいちばん新しい明細の次の月(明細が無ければ、支払いの月の次の月)。
+   * 記録は、どの明細の行とも突き合わなかったもののうち、いちばん新しい明細の最初の日より後のもの(明細が無ければ全部)
+   */
+  function forecast(p, cardId) {
+    const stmts = p.cardCheck.statements.filter((s) => s.cardId === cardId).sort((a, b) => (a.month < b.month ? -1 : 1));
+    const latest = stmts[stmts.length - 1] || null;
+    const month = U.ymAdd(latest ? latest.month : p.month, 1);
+    const monthly = p.cardCheck.known.filter((k) => k.cardId === cardId && appliesTo(k, month)).map((k) => ({ merchant: k.merchant, amount: k.amount }));
+    const first = latest && latest.rows.length ? latest.rows.map((r) => r.date).sort()[0] : null;
+    const records = unmatchedRecords(p, cardId)
+      .filter((r) => !first || r.date >= first)
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const sum = (xs) => xs.reduce((t, x) => t + x.amount, 0);
+    const monthlyTotal = sum(monthly);
+    const recordsTotal = sum(records);
+    return { month, monthly, monthlyTotal, records, recordsTotal, total: monthlyTotal + recordsTotal };
+  }
+
   function totals(p, st) {
     const bill = p.bills.find((b) => b.id === st.cardId);
     const total = st.rows.reduce((t, r) => t + r.amount, 0);
@@ -752,6 +772,7 @@
     activeKnown,
     duplicates,
     removeRows,
+    forecast,
     setPlaces,
     setCards,
     cleanLine,
