@@ -208,3 +208,14 @@ test('CSS:{ } の数がそろっていて、コメントが閉じている(崩�
   assert.equal(depth, 0, `閉じていない { がある(${opened.join('・')} 行目)`);
   assert.doesNotMatch(css, /^(<{7}|={7}|>{7})/m, '取り込みのときの印(<<<<<<< など)が残っている');
 });
+
+test('CSS:ダイアログは見えている範囲(キーボードの上まで)に収め、入力欄が下のタブに隠れない', () => {
+  const rule = (sel) => {
+    const m = css.match(new RegExp(`(?:^|\\n)${sel.replace(/[.[\]]/g, '\\$&')} \\{([^}]*)\\}`));
+    return m ? m[1] : '';
+  };
+  // 画面全体の高さ(dvh・vh)ではなく、キーボードが出ると縮む .sheet-layer の高さに合わせる
+  assert.match(rule('.sheet'), /max-height:\s*100%/);
+  assert.doesNotMatch(rule('.sheet'), /max-height:[^;]*(dvh|vh)/);
+  assert.match(rule('html'), /scroll-padding-bottom:[^;]*--tabbar-h/);
+});

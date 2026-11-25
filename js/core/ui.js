@@ -300,6 +300,16 @@
     function fitViewport() {
       layer.style.top = `${vv.offsetTop}px`;
       layer.style.height = `${vv.height}px`;
+      // 見える範囲が狭くなったら(キーボードが出たら)、打っている欄をダイアログの中で見える所へ動かす
+      const active = doc.activeElement;
+      if (active && active !== doc.body && panel.contains(active) && active.scrollIntoView) root.requestAnimationFrame(() => keepVisible(active));
+    }
+    /** 欄を見える所へ。下に固定した「キャンセル・保存」の帯の後ろに隠れないようにする */
+    function keepVisible(el) {
+      el.scrollIntoView({ block: 'nearest' });
+      if (root.getComputedStyle(foot).position !== 'sticky' || foot.contains(el)) return;
+      const over = el.getBoundingClientRect().bottom - foot.getBoundingClientRect().top + 8;
+      if (over > 0) panel.scrollTop += over;
     }
     if (vv) {
       vv.addEventListener('resize', fitViewport);

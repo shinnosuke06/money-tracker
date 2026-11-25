@@ -163,6 +163,8 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   background: var(--bg);
+  /* 入力欄などを画面に出すとき、下のタブの後ろに隠さない */
+  scroll-padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 12px);
 }
 
 html.is-locked,
@@ -1174,8 +1176,8 @@ button {
   flex-direction: column;
   width: 100%;
   max-width: 440px;
-  max-height: calc(100vh - 20px - env(safe-area-inset-top));
-  max-height: calc(100dvh - 20px - env(safe-area-inset-top));
+  /* 見えている範囲(.sheet-layer。キーボードが出ると、その上までの高さになる)に収める */
+  max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
   border-radius: 20px;
